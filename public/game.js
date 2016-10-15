@@ -8,7 +8,7 @@ const SCALE = 2
 const SZ = SPRITE_BLOCK_SIZE
 const SX = SZ * SCALE
 const BLOCK_SIZE = SPRITE_BLOCK_SIZE / 4
-const GAME_SPEED = 1000 / 10 // FPS !
+const STARTING_GAME_SPEED = 1 / 8
 const MAX_RUNTIME = 60000
 
 const pieces = createPieces()
@@ -32,20 +32,29 @@ function runGame () {
   init()
   .then(sprites => {
     const game = createNewGame(sprites)
-    runGameLoop(game)
+    window.requestAnimationFrame(() => runGameLoop(game))
   })
 }
 
 function runGameLoop (game) {
-  const interval = setInterval(() => {
-    moveAndRotatePiece(game)
-    draw(game)
-    stats.runtime = Date.now() - stats.runningSince
-    if (stats.runtime > MAX_RUNTIME) {
-      clearInterval(interval)
-      console.log('Game engine stopped, stats:', stats)
-    }
-  }, GAME_SPEED)
+  moveAndRotatePiece(game)
+  drawFallingPiece(game)
+  stats.runtime = Date.now() - stats.runningSince
+  if (stats.runtime > MAX_RUNTIME) {
+    console.log('Game engine stopped, stats:', stats)
+  } else {
+    nextGameTick(game)
+    window.requestAnimationFrame(() => runGameLoop(game))
+  }
+}
+
+function nextGameTick (game) {
+  // Move everything along !
+  game.ticks += game.speed
+  if (game.ticks > 1.0) {
+    game.ticks = 0
+    game.current.row++
+  }
 }
 
 function createNewGame (sprites) {
@@ -58,6 +67,8 @@ function createNewGame (sprites) {
       w: BOARD_WIDTH / 2,
       h: gameRows * BLOCK_SIZE * SCALE
     },
+    ticks: 0,
+    speed: STARTING_GAME_SPEED,
     bag: getRandomBagOfTetraminos().slice(0, 5),
     current: null,
     index: 0
@@ -103,7 +114,7 @@ function getPieceColWidth (piece) {
 function moveAndRotatePiece (game) {
   if (game.current) {
     const possibleRotations = tetraminos[game.current.type]
-    const maxCols = Math.floor(game.board.w / BLOCK_SIZE)
+    // console.log('move: col=', game.current.col, 'max=', maxCols)
     let r = game.current.rotation
     let col = game.current.col
     inputs.keyBuffer.forEach(key => {
@@ -112,11 +123,16 @@ function moveAndRotatePiece (game) {
       if (r < 1) r = possibleRotations
       if (r > possibleRotations) r = 1
       if (key === 'left' && col > 0) col--
-      if (key === 'right' && col < maxCols) col++
+      if (key === 'right' && col < game.maxCols) col++
       game.current.rotation = r
       game.current.col = col
     })
     inputs.keyBuffer = []
+
+    // Ensure that piece fits on X-axis after applying
+    // all rotations for this frame.
+    const maxCols = game.maxCols - getPieceColWidth(game.current)
+    if (game.current.col > maxCols) game.current.col = maxCols
   }
 }
 
@@ -146,18 +162,10 @@ function drawFallingPiece (game) {
       piece.w * SCALE,
       piece.h * SCALE
     )
-    // Move the piece downwards.
-    game.current.row++
   } else {
     // Grap a new piece.
     game.current = getPieceFromBag(game)
   }
-}
-
-function draw (game) {
-  window.requestAnimationFrame(() => {
-    drawFallingPiece(game)
-  })
 }
 
 function range (min, max) {
