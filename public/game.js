@@ -7,14 +7,19 @@ const BOARD_WIDTH = 832
 const SCALE = 2
 const SZ = SPRITE_BLOCK_SIZE
 const SX = SZ * SCALE
-const LINE_HEIGHT = SPRITE_BLOCK_SIZE / 4
-const GAME_SPEED = 1000 / 30 // 15 FPS
+const BLOCK_SIZE = SPRITE_BLOCK_SIZE / 4
+const GAME_SPEED = 1000 / 10 // FPS !
+const MAX_RUNTIME = 60000
 
 const pieces = createPieces()
-const tetraminos = ['LB', 'LL', 'LR', 'CU', 'SR', 'TR', 'SL']
+const tetraminos = { 'LB': 2, 'LL': 4, 'LR': 4, 'CU': 1, 'SR': 2, 'TR': 4, 'SL': 2 }
 
 const ctx = document.getElementById('game').getContext('2d')
+// ctx.globalCompositeOperation = 'destination-over'
 
+const inputs = {
+  keyBuffer: []
+}
 const stats = {
   runningSince: Date.now(),
   runtime: 0
@@ -23,32 +28,46 @@ const stats = {
 runGame()
 
 function runGame () {
-  console.log('Tetris running.')
+  console.log('Tetris is running.')
   init()
   .then(sprites => {
-    const gameRows = Math.ceil(BOARD_HEIGHT / (LINE_HEIGHT * SCALE) / 2)
-    const game = {
-      sprites,
-      board: {
-        x: BOARD_WIDTH / 2,
-        y: 0,
-        w: BOARD_WIDTH / 2,
-        h: gameRows * LINE_HEIGHT * SCALE
-      },
-      bag: getRandomBagOfTetraminos().slice(0, 5),
-      current: null,
-      index: 0
-    }
-    console.log('Game:', game)
-    const interval = setInterval(() => {
-      draw(game)
-      stats.runtime = Date.now() - stats.runningSince
-      if (stats.runtime > 5000) {
-        clearInterval(interval)
-        console.log('Game engine stopped, stats:', stats)
-      }
-    }, GAME_SPEED)
+    const game = createNewGame(sprites)
+    runGameLoop(game)
   })
+}
+
+function runGameLoop (game) {
+  const interval = setInterval(() => {
+    moveAndRotatePiece(game)
+    draw(game)
+    stats.runtime = Date.now() - stats.runningSince
+    if (stats.runtime > MAX_RUNTIME) {
+      clearInterval(interval)
+      console.log('Game engine stopped, stats:', stats)
+    }
+  }, GAME_SPEED)
+}
+
+function createNewGame (sprites) {
+  const gameRows = Math.ceil(BOARD_HEIGHT / (BLOCK_SIZE * SCALE))
+  const game = {
+    sprites,
+    board: {
+      x: BOARD_WIDTH / 2,
+      y: 0,
+      w: BOARD_WIDTH / 2,
+      h: gameRows * BLOCK_SIZE * SCALE
+    },
+    bag: getRandomBagOfTetraminos().slice(0, 5),
+    current: null,
+    index: 0
+  }
+
+  // Additional data.
+  game.maxCols = Math.floor(game.board.w / (BLOCK_SIZE * SCALE))
+
+  console.log('New game:', game)
+  return game
 }
 
 function getPieceFromBag (game) {
@@ -59,14 +78,46 @@ function getPieceFromBag (game) {
     game.index = 0
     console.log('Generated new bag.')
   }
+
   const piece = {
     type: game.bag[game.index],
     rotation: 1,
-    posY: 0
+    row: 0,
+    col: 0
   }
+
+  // Start this piece right smack in the middle.
+  piece.col = Math.floor(game.maxCols / 2 - getPieceColWidth(piece) / 2)
+
   game.index++
   console.log('Got new piece:', piece)
   return piece
+}
+
+function getPieceColWidth (piece) {
+  const spriteId = piece.type + piece.rotation
+  const sprite = pieces[spriteId]
+  return Math.floor(sprite.w / BLOCK_SIZE)
+}
+
+function moveAndRotatePiece (game) {
+  if (game.current) {
+    const possibleRotations = tetraminos[game.current.type]
+    const maxCols = Math.floor(game.board.w / BLOCK_SIZE)
+    let r = game.current.rotation
+    let col = game.current.col
+    inputs.keyBuffer.forEach(key => {
+      if (key === 'up') r--
+      if (key === 'down') r++
+      if (r < 1) r = possibleRotations
+      if (r > possibleRotations) r = 1
+      if (key === 'left' && col > 0) col--
+      if (key === 'right' && col < maxCols) col++
+      game.current.rotation = r
+      game.current.col = col
+    })
+    inputs.keyBuffer = []
+  }
 }
 
 function drawFallingPiece (game) {
@@ -74,27 +125,31 @@ function drawFallingPiece (game) {
     game.current = getPieceFromBag(game)
   }
 
-  // Clear right side of game board.
-  ctx.globalCompositeOperation = 'destination-over'
-  ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
-
   const spriteId = game.current.type + game.current.rotation
   const piece = pieces[spriteId]
 
-  ctx.drawImage(game.sprites,
-    piece.x,
-    piece.y,
-    piece.w,
-    piece.h,
-    game.board.x + game.board.w / 2,
-    game.board.y + game.current.posY * LINE_HEIGHT * SCALE,
-    piece.w * 2,
-    piece.h * 2
-  )
-  // Move the piece downwards if there’s space.
-  if (game.current.posY * LINE_HEIGHT * SCALE + piece.h * 2 < game.board.h) {
-    game.current.posY++
+  const pieceHeight = piece.h * SCALE
+  const piecePosX = game.board.x + game.current.col * BLOCK_SIZE * SCALE
+  const piecePosY = game.board.y - pieceHeight + game.current.row * BLOCK_SIZE * SCALE
+
+  const hasReachedBottom = piecePosY + pieceHeight >= game.board.h
+  if (!hasReachedBottom) {
+    // Clear & Draw.
+    ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
+    ctx.drawImage(game.sprites,
+      piece.x,
+      piece.y,
+      piece.w,
+      piece.h,
+      piecePosX,
+      piecePosY,
+      piece.w * SCALE,
+      piece.h * SCALE
+    )
+    // Move the piece downwards.
+    game.current.row++
   } else {
+    // Grap a new piece.
     game.current = getPieceFromBag(game)
   }
 }
@@ -114,7 +169,7 @@ function range (min, max) {
 
 function getRandomBagOfTetraminos () {
   return shuffle(
-    tetraminos.reduce((acc, pieceName) => {
+    Object.keys(tetraminos).reduce((acc, pieceName) => {
       return acc.concat(range(5, 10).map(() => pieceName))
     }, [])
   )
@@ -123,15 +178,49 @@ function getRandomBagOfTetraminos () {
 function init () {
   const sprites = new Image()
   const p = new Promise(resolve => {
-    console.log('Loading sprites ..')
+    console.log('Loading game sprites ..')
     sprites.onload = () => {
       dumpPieces(sprites)
-      console.log('Sprites loaded successfully.')
+      console.log('Game sprites loaded successfully.')
       resolve(sprites)
     }
   })
   sprites.src = '/tetris.png'
+
+  // Setup keyboard event handler.
+  setupKeyboardEventHandler()
+
   return p
+}
+
+function setupKeyboardEventHandler () {
+  document.onkeydown = function (event) {
+    if (!event) {
+      event = window.event
+    }
+    let code = event.keyCode
+    if (event.charCode && code === 0) {
+      code = event.charCode
+    }
+    switch (code) {
+      case 37:
+        inputs.keyBuffer.push('left')
+        break
+      case 38:
+      case 16:
+        inputs.keyBuffer.push('up')
+        break
+      case 39:
+        inputs.keyBuffer.push('right')
+        break
+      case 40:
+        inputs.keyBuffer.push('down')
+        break
+      default:
+        console.log('Got char code:', code)
+    }
+    // event.preventDefault()
+  }
 }
 
 function shuffle (array) {
@@ -168,7 +257,7 @@ function dumpPieces (sprites) {
       piece.w * 2,
       piece.h * 2
     )
-    offsetY += piece.h * 2
+    offsetY += piece.h * SCALE
     if (offsetY > BOARD_HEIGHT) {
       offsetY = 0
       offsetX += SX * 2
