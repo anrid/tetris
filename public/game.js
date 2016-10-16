@@ -1,21 +1,22 @@
 /* globals Image, XMLHttpRequest */
 'use strict'
 
-const SPRITE_BLOCK_SIZE = 32
 const BOARD_HEIGHT = 864 / 2
 const BOARD_WIDTH = 832 / 2
 const SCALE = 2
-const SZ = SPRITE_BLOCK_SIZE
-const SX = SZ * SCALE
-const BLOCK_SIZE = SPRITE_BLOCK_SIZE / 4
+const BZ = 8
+const B2 = BZ * SCALE
 const STARTING_GAME_SPEED = 1 / 4
 const MAX_RUNTIME = 60000
+// NOTE: Use this to force shapes during testing.
+const FORCE_SHAPES = false // ['LB']
+const ENABLE_SOUND = false
 
 const IMAGES = [
   { id: 'gameSprites', url: '/tetris.png' }
 ]
 const SOUNDS = [
-  // { id: 'bgMusic1', url: '/sounds/dk-main.mp3' },
+  // { id: 'bgMusic1', url: '/sounds/dk-main.mp3' }
   // { id: 'bgMusic2', url: '/sounds/dk-start.mp3' },
   // { id: 'bgMusic3', url: '/sounds/dk-howhigh.mp3' },
   // { id: 'bgMusic4', url: '/sounds/dk-hammer.mp3' }
@@ -23,14 +24,10 @@ const SOUNDS = [
   { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3' },
   { id: 'bgMusic3', url: '/sounds/bg-music-03.mp3' },
   { id: 'bgMusic4', url: '/sounds/bg-music-04.mp3' }
-  // { id: 'bgMusic5', url: '/sounds/bg-music-05.mp3' }
 ]
 
-const pieces = createPieces()
-const tetraminos = { 'LB': 2, 'LL': 4, 'LR': 4, 'CU': 1, 'SR': 2, 'TR': 4, 'SL': 2 }
-
-// NOTE: Force a set of tetraminos when testing.
-// const tetraminos = { 'LB': 2 }
+// Create our Tetraminos.
+const TETRAS = createTetraminos('LB')
 
 const ctx = document.getElementById('game').getContext('2d')
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
@@ -41,14 +38,14 @@ window.onload = runGame
 
 function runGame () {
   console.log('Loading Tetris ..')
-  loadResources()
+  loadResources(IMAGES, SOUNDS)
   .then(resources => {
     console.log('Tetris loaded.')
-    // FIXME: Remove this later.
-    dumpPieces(resources.images[0].image)
-
     // Create a new game.
     const game = createNewGame(resources)
+
+    // FIXME: Remove this later.
+    dumpPieces(game.sprites)
 
     // Hookup keyboard events.
     enableKeyboardEvents(game)
@@ -79,9 +76,14 @@ function moveEverything (game) {
     game.ticks = 0
     game.current.row++
   }
-  const data = getPieceData(game, game.current)
-  const rowsRemaining = game.board.rows - data.rows - game.current.row
+  const info = getPieceInfo(game, game.current)
+
+  // Ensure that piece fits on X-axis.
+  const colsRemaining = game.board.cols - info.cols - game.current.col
+  if (colsRemaining < 0) game.current.col += colsRemaining
+
   // No rows remaining ? Time for a new piece.
+  const rowsRemaining = game.board.rows - info.rows - game.current.row
   if (rowsRemaining <= 0) {
     // Don’t allow the current piece to ever go past the bottom.
     game.current.row += rowsRemaining
@@ -110,8 +112,8 @@ function createNewGame (resources) {
     board: {
       x: BOARD_WIDTH,
       y: 0,
-      w: boardCols * BLOCK_SIZE * SCALE,
-      h: boardRows * BLOCK_SIZE * SCALE,
+      w: boardCols * B2,
+      h: boardRows * B2,
       cols: boardCols,
       rows: boardRows
     },
@@ -134,7 +136,9 @@ function createNewGame (resources) {
   game.current = getPieceFromBag(game)
 
   // Start the music.
-  playBackgroundMusic(game)
+  if (ENABLE_SOUND) {
+    playBackgroundMusic(game)
+  }
 
   console.log('Created new game:', game)
   return game
@@ -181,50 +185,45 @@ function getPieceFromBag (game) {
   }
 
   // Start this piece right smack in the middle.
-  piece.col = Math.floor(game.board.cols / 2 - getPieceData(game, piece).cols / 2)
+  piece.col = Math.floor(game.board.cols / 2 - getPieceInfo(game, piece).cols / 2)
 
   game.index++
   console.log('Got new piece:', piece)
   return piece
 }
 
-function getPieceData (game, piece) {
-  const spriteId = piece.type + piece.rotation
-  const sprite = pieces[spriteId]
-
+function getPieceInfo (game, piece) {
+  const shapeId = piece.type + piece.rotation
+  const shape = TETRAS.all[shapeId]
   return {
-    sprite,
-    cols: Math.floor(sprite.w / BLOCK_SIZE),
-    rows: Math.floor(sprite.h / BLOCK_SIZE),
-    w: sprite.w * SCALE,
-    h: sprite.h * SCALE,
-    x: game.board.x + piece.col * BLOCK_SIZE * SCALE,
-    y: game.board.y + piece.row * BLOCK_SIZE * SCALE
+    shapeId,
+    color: shape.color,
+    cols: shape.cols,
+    rows: shape.rows,
+    w: shape.cols * B2,
+    h: shape.rows * B2,
+    x: game.board.x + piece.col * B2,
+    y: game.board.y + piece.row * B2
   }
 }
 
 function moveAndRotatePiece (game) {
   if (game.current) {
-    const possibleRotations = tetraminos[game.current.type]
+    const numShapes = TETRAS.shapes[game.current.type].count
     // console.log('move: col=', game.current.col, 'max=', maxCols)
     let r = game.current.rotation
     let col = game.current.col
     game.inputs.keyBuffer.forEach(key => {
       if (key === 'up') r--
       if (key === 'down') r++
-      if (r < 1) r = possibleRotations
-      if (r > possibleRotations) r = 1
+      if (r < 1) r = numShapes
+      if (r > numShapes) r = 1
       if (key === 'left' && col > 0) col--
       if (key === 'right' && col < game.board.cols) col++
       game.current.rotation = r
       game.current.col = col
     })
     game.inputs.keyBuffer = []
-
-    // Ensure that piece fits on X-axis after applying
-    // all rotations for this frame.
-    const maxCols = game.board.cols - getPieceData(game, game.current).cols
-    if (game.current.col > maxCols) game.current.col = maxCols
   }
 }
 
@@ -232,19 +231,11 @@ function drawPieces (game) {
   // Clear first.
   ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
 
+  // Draw all the things.
   game.all.concat(game.current).forEach(piece => {
-    const data = getPieceData(game, piece)
-    // Draw.
-    ctx.drawImage(game.sprites,
-      data.sprite.x,
-      data.sprite.y,
-      data.sprite.w,
-      data.sprite.h,
-      data.x,
-      data.y,
-      data.w,
-      data.h
-    )
+    const info = getPieceInfo(game, piece)
+    const shape = TETRAS.all[info.shapeId]
+    drawShape(game.sprites, shape, info.x, info.y)
   })
 }
 
@@ -256,21 +247,22 @@ function range (min, max) {
 }
 
 function getRandomBagOfTetraminos () {
+  const shapes = FORCE_SHAPES || Object.keys(TETRAS.shapes)
   return shuffle(
-    Object.keys(tetraminos).reduce((acc, pieceName) => {
+    shapes.reduce((acc, pieceName) => {
       return acc.concat(range(5, 10).map(() => pieceName))
     }, [])
   )
 }
 
-function loadResources () {
+function loadResources (images, sounds) {
   const promises = []
 
   // Load sprites.
-  IMAGES.forEach(x => promises.push(loadImage(x.id, x.url)))
+  images.forEach(x => promises.push(loadImage(x.id, x.url)))
 
   // Load all sounds.
-  SOUNDS.forEach(x => promises.push(loadSoundBuffer(x.id, x.url)))
+  sounds.forEach(x => promises.push(loadSoundBuffer(x.id, x.url)))
 
   return Promise.all(promises).then(res => ({
     images: [res[0]],
@@ -327,57 +319,80 @@ function shuffle (array) {
   return array
 }
 
-function dumpPieces (sprites) {
-  let offsetY = 0
-  let offsetX = 0
-  Object.keys(pieces).forEach(x => {
-    const piece = pieces[x]
-    ctx.drawImage(sprites,
-      piece.x,
-      piece.y,
-      piece.w,
-      piece.h,
-      offsetX,
-      offsetY,
-      piece.w * 2,
-      piece.h * 2
-    )
-    offsetY += piece.h * SCALE
-    if (offsetY > BOARD_HEIGHT) {
-      offsetY = 0
-      offsetX += SX * 2
+function createTetraminos () {
+  const createBlock = (offset) => ({ x: 0 + offset * BZ, y: BZ * 24 })
+
+  return {
+    shapes: {
+      'LB': { count: 2 },
+      'LL': { count: 4 },
+      'LR': { count: 4 },
+      'CU': { count: 1 },
+      'SR': { count: 2 },
+      'TR': { count: 4 },
+      'SL': { count: 2 }
+    },
+    colors: {
+      red: createBlock(0),
+      blue: createBlock(1),
+      orange: createBlock(2),
+      yellow: createBlock(3),
+      purple: createBlock(4),
+      teal: createBlock(5),
+      green: createBlock(6),
+      black: createBlock(7),
+      gray: createBlock(8)
+    },
+    all: {
+      'LB1': { color: 'red', grid: [[1, 1, 1, 1]], cols: 4, rows: 1 },
+      'LB2': { color: 'red', grid: [[1], [1], [1], [1]], cols: 1, rows: 4 },
+      'LL1': { color: 'blue', grid: [[1, 1, 1], [0, 0, 1]], cols: 3, rows: 2 },
+      'LL2': { color: 'blue', grid: [[0, 1], [0, 1], [1, 1]], cols: 2, rows: 3 },
+      'LL3': { color: 'blue', grid: [[1, 0, 0], [1, 1, 1]], cols: 3, rows: 2 },
+      'LL4': { color: 'blue', grid: [[1, 1], [1], [1]], cols: 2, rows: 3 },
+      'LR1': { color: 'orange', grid: [[0, 0, 1], [1, 1, 1]], cols: 3, rows: 2 },
+      'LR2': { color: 'orange', grid: [[1, 0], [1, 0], [1, 1]], cols: 2, rows: 3 },
+      'LR3': { color: 'orange', grid: [[1, 1, 1], [1, 0, 0]], cols: 3, rows: 2 },
+      'LR4': { color: 'orange', grid: [[1, 1], [0, 1], [0, 1]], cols: 2, rows: 3 },
+      'CU1': { color: 'yellow', grid: [[1, 1], [1, 1]], cols: 2, rows: 2 },
+      'SR1': { color: 'purple', grid: [[0, 1, 1], [1, 1, 0]], cols: 3, rows: 2 },
+      'SR2': { color: 'purple', grid: [[1, 0], [1, 1], [0, 1]], cols: 2, rows: 3 },
+      'TR1': { color: 'teal', grid: [[1, 1, 1], [0, 1, 0]], cols: 3, rows: 2 },
+      'TR2': { color: 'teal', grid: [[1, 0], [1, 1], [1, 0]], cols: 2, rows: 3 },
+      'TR3': { color: 'teal', grid: [[0, 1, 0], [1, 1, 1]], cols: 3, rows: 2 },
+      'TR4': { color: 'teal', grid: [[0, 1], [1, 1], [0, 1]], cols: 2, rows: 3 },
+      'SL1': { color: 'green', grid: [[1, 1, 0], [0, 1, 1]], cols: 3, rows: 2 },
+      'SL2': { color: 'green', grid: [[0, 1], [1, 1], [1, 0]], cols: 2, rows: 3 }
     }
+  }
+}
+
+// @params sprites, shape, offsetX, offsetY, gridX, gridY.
+function drawBlockOnGrid (sprites, s, ox, oy, gx, gy) {
+  ctx.drawImage(
+    sprites,
+    s.x, s.y, BZ, BZ,
+    ox + gx * B2, oy + gy * B2, B2, B2
+  )
+}
+
+function drawShape (sprites, shape, offsetX, offsetY) {
+  const block = TETRAS.colors[shape.color]
+  shape.grid.forEach((row, y) => {
+    row.forEach((col, x) => {
+      if (col === 1) drawBlockOnGrid(sprites, block, offsetX, offsetY, x, y)
+    })
   })
 }
 
-function createPieces () {
-  return {
-    LB1: { x: 104, y: 8, w: SZ, h: 8 },
-    LB2: { x: 104 + SZ + 8, y: 0, w: 8, h: SZ },
-
-    LL1: { x: 104, y: SZ * 1 + 16, w: 24, h: 16 },
-    LL2: { x: 104 + SZ * 1, y: SZ * 1 + 8, w: 16, h: 24 },
-    LL3: { x: 104 + SZ * 2 - 8, y: SZ * 1 + 16, w: 24, h: 16 },
-    LL4: { x: 104 + SZ * 3 - 8, y: SZ * 1 + 8, w: 16, h: 24 },
-
-    LR1: { x: 104, y: SZ * 2 + 16, w: 24, h: 16 },
-    LR2: { x: 104 + SZ, y: SZ * 2 + 8, w: 16, h: 24 },
-    LR3: { x: 104 + SZ * 2 - 8, y: SZ * 2 + 16, w: 24, h: 16 },
-    LR4: { x: 104 + SZ * 3 - 8, y: SZ * 2 + 8, w: 16, h: 24 },
-
-    CU1: { x: 104, y: SZ * 3 + 8, w: 16, h: 16 },
-
-    SR1: { x: 104, y: SZ * 4 + 8, w: 24, h: 16 },
-    SR2: { x: 104 + SZ * 1, y: SZ * 4, w: 16, h: 24 },
-
-    TR1: { x: 104, y: SZ * 5 + 8, w: 24, h: 16 },
-    TR2: { x: 104 + SZ, y: SZ * 5, w: 16, h: 24 },
-    TR3: { x: 104 + SZ * 2 - 8, y: SZ * 5 + 8, w: 24, h: 16 },
-    TR4: { x: 104 + SZ * 3 - 8, y: SZ * 5, w: 16, h: 24 },
-
-    SL1: { x: 104, y: SZ * 6 + 8, w: 24, h: 16 },
-    SL2: { x: 104 + SZ, y: SZ * 6, w: 16, h: 24 }
-  }
+function dumpPieces (sprites) {
+  let offsetX = 0
+  let offsetY = 0
+  Object.keys(TETRAS.all).forEach(id => {
+    const shape = TETRAS.all[id]
+    drawShape(sprites, shape, offsetX, offsetY)
+    offsetY += shape.rows * B2
+  })
 }
 
 function loadImage (id, url) {
