@@ -3,12 +3,12 @@
 
 const SPRITE_BLOCK_SIZE = 32
 const BOARD_HEIGHT = 864 / 2
-const BOARD_WIDTH = 832
+const BOARD_WIDTH = 832 / 2
 const SCALE = 2
 const SZ = SPRITE_BLOCK_SIZE
 const SX = SZ * SCALE
 const BLOCK_SIZE = SPRITE_BLOCK_SIZE / 4
-const STARTING_GAME_SPEED = 1 / 8
+const STARTING_GAME_SPEED = 1 / 4
 const MAX_RUNTIME = 60000
 
 const pieces = createPieces()
@@ -17,31 +17,24 @@ const tetraminos = { 'LB': 2, 'LL': 4, 'LR': 4, 'CU': 1, 'SR': 2, 'TR': 4, 'SL':
 const ctx = document.getElementById('game').getContext('2d')
 // ctx.globalCompositeOperation = 'destination-over'
 
-const inputs = {
-  keyBuffer: []
-}
-const stats = {
-  runningSince: Date.now(),
-  runtime: 0
-}
-
 runGame()
 
 function runGame () {
   console.log('Tetris is running.')
-  init()
-  .then(sprites => {
-    const game = createNewGame(sprites)
+  loadResources()
+  .then(resources => {
+    const game = createNewGame(resources)
+    enableKeyboardEvents(game)
     window.requestAnimationFrame(() => runGameLoop(game))
   })
 }
 
 function runGameLoop (game) {
   moveAndRotatePiece(game)
-  drawFallingPiece(game)
-  stats.runtime = Date.now() - stats.runningSince
-  if (stats.runtime > MAX_RUNTIME) {
-    console.log('Game engine stopped, stats:', stats)
+  drawPieces(game)
+  game.stats.runtime = Date.now() - game.stats.runningSince
+  if (game.stats.runtime > MAX_RUNTIME) {
+    console.log('Game engine stopped, stats:', game.stats)
   } else {
     nextGameTick(game)
     window.requestAnimationFrame(() => runGameLoop(game))
@@ -54,28 +47,51 @@ function nextGameTick (game) {
   if (game.ticks > 1.0) {
     game.ticks = 0
     game.current.row++
+
+    const data = getPieceData(game, game.current)
+    const rowsRemaining = game.board.rows - data.rows - game.current.row
+    // No rows remaining ? Time for a new piece.
+    if (rowsRemaining <= 0) {
+      // Don’t allow the current piece to ever go past the bottom.
+      game.current.row += rowsRemaining
+      game.all.push(game.current)
+      game.current = getPieceFromBag(game)
+    }
   }
 }
 
-function createNewGame (sprites) {
-  const gameRows = Math.ceil(BOARD_HEIGHT / (BLOCK_SIZE * SCALE))
+function createNewGame (resources) {
+  const boardCols = 10
+  const boardRows = 22
+  const bag = getRandomBagOfTetraminos().slice(0, 5)
+
   const game = {
-    sprites,
+    sprites: resources.sprites,
     board: {
-      x: BOARD_WIDTH / 2,
+      x: BOARD_WIDTH,
       y: 0,
-      w: BOARD_WIDTH / 2,
-      h: gameRows * BLOCK_SIZE * SCALE
+      w: boardCols * BLOCK_SIZE * SCALE,
+      h: boardRows * BLOCK_SIZE * SCALE,
+      cols: boardCols,
+      rows: boardRows
     },
     ticks: 0,
     speed: STARTING_GAME_SPEED,
-    bag: getRandomBagOfTetraminos().slice(0, 5),
+    bag,
     current: null,
-    index: 0
+    all: [],
+    index: 0,
+    inputs: {
+      keyBuffer: []
+    },
+    stats: {
+      runningSince: Date.now(),
+      runtime: 0
+    }
   }
 
-  // Additional data.
-  game.maxCols = Math.floor(game.board.w / (BLOCK_SIZE * SCALE))
+  // Rock our first piece !
+  game.current = getPieceFromBag(game)
 
   console.log('New game:', game)
   return game
@@ -98,17 +114,26 @@ function getPieceFromBag (game) {
   }
 
   // Start this piece right smack in the middle.
-  piece.col = Math.floor(game.maxCols / 2 - getPieceColWidth(piece) / 2)
+  piece.col = Math.floor(game.board.cols / 2 - getPieceData(game, piece).cols / 2)
 
   game.index++
   console.log('Got new piece:', piece)
   return piece
 }
 
-function getPieceColWidth (piece) {
+function getPieceData (game, piece) {
   const spriteId = piece.type + piece.rotation
   const sprite = pieces[spriteId]
-  return Math.floor(sprite.w / BLOCK_SIZE)
+
+  return {
+    sprite,
+    cols: Math.floor(sprite.w / BLOCK_SIZE),
+    rows: Math.floor(sprite.h / BLOCK_SIZE),
+    w: sprite.w * SCALE,
+    h: sprite.h * SCALE,
+    x: game.board.x + piece.col * BLOCK_SIZE * SCALE,
+    y: game.board.y + piece.row * BLOCK_SIZE * SCALE
+  }
 }
 
 function moveAndRotatePiece (game) {
@@ -117,55 +142,43 @@ function moveAndRotatePiece (game) {
     // console.log('move: col=', game.current.col, 'max=', maxCols)
     let r = game.current.rotation
     let col = game.current.col
-    inputs.keyBuffer.forEach(key => {
+    game.inputs.keyBuffer.forEach(key => {
       if (key === 'up') r--
       if (key === 'down') r++
       if (r < 1) r = possibleRotations
       if (r > possibleRotations) r = 1
       if (key === 'left' && col > 0) col--
-      if (key === 'right' && col < game.maxCols) col++
+      if (key === 'right' && col < game.board.cols) col++
       game.current.rotation = r
       game.current.col = col
     })
-    inputs.keyBuffer = []
+    game.inputs.keyBuffer = []
 
     // Ensure that piece fits on X-axis after applying
     // all rotations for this frame.
-    const maxCols = game.maxCols - getPieceColWidth(game.current)
+    const maxCols = game.board.cols - getPieceData(game, game.current).cols
     if (game.current.col > maxCols) game.current.col = maxCols
   }
 }
 
-function drawFallingPiece (game) {
-  if (!game.current) {
-    game.current = getPieceFromBag(game)
-  }
+function drawPieces (game) {
+  // Clear first.
+  ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
 
-  const spriteId = game.current.type + game.current.rotation
-  const piece = pieces[spriteId]
-
-  const pieceHeight = piece.h * SCALE
-  const piecePosX = game.board.x + game.current.col * BLOCK_SIZE * SCALE
-  const piecePosY = game.board.y - pieceHeight + game.current.row * BLOCK_SIZE * SCALE
-
-  const hasReachedBottom = piecePosY + pieceHeight >= game.board.h
-  if (!hasReachedBottom) {
-    // Clear & Draw.
-    ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
+  game.all.concat(game.current).forEach(piece => {
+    const data = getPieceData(game, piece)
+    // Draw.
     ctx.drawImage(game.sprites,
-      piece.x,
-      piece.y,
-      piece.w,
-      piece.h,
-      piecePosX,
-      piecePosY,
-      piece.w * SCALE,
-      piece.h * SCALE
+      data.sprite.x,
+      data.sprite.y,
+      data.sprite.w,
+      data.sprite.h,
+      data.x,
+      data.y,
+      data.w,
+      data.h
     )
-  } else {
-    // Grap a new piece.
-    game.current = getPieceFromBag(game)
-  }
+  })
 }
 
 function range (min, max) {
@@ -183,25 +196,23 @@ function getRandomBagOfTetraminos () {
   )
 }
 
-function init () {
+function loadResources () {
   const sprites = new Image()
   const p = new Promise(resolve => {
     console.log('Loading game sprites ..')
     sprites.onload = () => {
       dumpPieces(sprites)
       console.log('Game sprites loaded successfully.')
-      resolve(sprites)
+      resolve({
+        sprites
+      })
     }
   })
   sprites.src = '/tetris.png'
-
-  // Setup keyboard event handler.
-  setupKeyboardEventHandler()
-
   return p
 }
 
-function setupKeyboardEventHandler () {
+function enableKeyboardEvents (game) {
   document.onkeydown = function (event) {
     if (!event) {
       event = window.event
@@ -212,17 +223,17 @@ function setupKeyboardEventHandler () {
     }
     switch (code) {
       case 37:
-        inputs.keyBuffer.push('left')
+        game.inputs.keyBuffer.push('left')
         break
       case 38:
       case 16:
-        inputs.keyBuffer.push('up')
+        game.inputs.keyBuffer.push('up')
         break
       case 39:
-        inputs.keyBuffer.push('right')
+        game.inputs.keyBuffer.push('right')
         break
       case 40:
-        inputs.keyBuffer.push('down')
+        game.inputs.keyBuffer.push('down')
         break
       default:
         console.log('Got char code:', code)
