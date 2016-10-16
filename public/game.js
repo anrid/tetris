@@ -13,6 +13,8 @@ const MAX_RUNTIME = 60000
 
 const pieces = createPieces()
 const tetraminos = { 'LB': 2, 'LL': 4, 'LR': 4, 'CU': 1, 'SR': 2, 'TR': 4, 'SL': 2 }
+// NOTE: Simply force a set of tetraminos during testing.
+// const tetraminos = { 'LB': 2 }
 
 const ctx = document.getElementById('game').getContext('2d')
 // ctx.globalCompositeOperation = 'destination-over'
@@ -31,32 +33,35 @@ function runGame () {
 
 function runGameLoop (game) {
   moveAndRotatePiece(game)
+  moveEverything(game)
   drawPieces(game)
   game.stats.runtime = Date.now() - game.stats.runningSince
   if (game.stats.runtime > MAX_RUNTIME) {
     console.log('Game engine stopped, stats:', game.stats)
   } else {
-    nextGameTick(game)
     window.requestAnimationFrame(() => runGameLoop(game))
   }
 }
 
-function nextGameTick (game) {
+function moveEverything (game) {
   // Move everything along !
   game.ticks += game.speed
   if (game.ticks > 1.0) {
     game.ticks = 0
     game.current.row++
-
-    const data = getPieceData(game, game.current)
-    const rowsRemaining = game.board.rows - data.rows - game.current.row
-    // No rows remaining ? Time for a new piece.
-    if (rowsRemaining <= 0) {
-      // Don’t allow the current piece to ever go past the bottom.
-      game.current.row += rowsRemaining
-      game.all.push(game.current)
-      game.current = getPieceFromBag(game)
-    }
+  }
+  const data = getPieceData(game, game.current)
+  const rowsRemaining = game.board.rows - data.rows - game.current.row
+  // No rows remaining ? Time for a new piece.
+  if (rowsRemaining <= 0) {
+    // Don’t allow the current piece to ever go past the bottom.
+    // console.log(
+    //   'No rows remaining:',
+    //   'board.rows=', game.board.rows, 'piece.rows=', data.rows, 'current.row=', game.current.row
+    // )
+    game.current.row += rowsRemaining
+    game.all.push(game.current)
+    game.current = getPieceFromBag(game)
   }
 }
 
