@@ -1,6 +1,8 @@
 /* globals Image, XMLHttpRequest */
 'use strict'
 
+const BOARD_COLS = 10
+const BOARD_ROWS = 22
 const BOARD_HEIGHT = 864 / 2
 const BOARD_WIDTH = 832 / 2
 const SCALE = 2
@@ -9,7 +11,7 @@ const B2 = BZ * SCALE
 const STARTING_GAME_SPEED = 1 / 4
 const MAX_RUNTIME = 60000
 // NOTE: Use this to force shapes during testing.
-const FORCE_SHAPES = false // ['LB']
+const FORCE_SHAPES = false // ['LB', 'LB', 'LB', 'LB']
 const ENABLE_SOUND = false
 
 const IMAGES = [
@@ -20,10 +22,10 @@ const SOUNDS = [
   // { id: 'bgMusic2', url: '/sounds/dk-start.mp3' },
   // { id: 'bgMusic3', url: '/sounds/dk-howhigh.mp3' },
   // { id: 'bgMusic4', url: '/sounds/dk-hammer.mp3' }
-  { id: 'bgMusic1', url: '/sounds/bg-music-01.mp3' },
-  { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3' },
-  { id: 'bgMusic3', url: '/sounds/bg-music-03.mp3' },
-  { id: 'bgMusic4', url: '/sounds/bg-music-04.mp3' }
+  // { id: 'bgMusic1', url: '/sounds/bg-music-01.mp3' },
+  // { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3' },
+  // { id: 'bgMusic3', url: '/sounds/bg-music-03.mp3' },
+  // { id: 'bgMusic4', url: '/sounds/bg-music-04.mp3' }
 ]
 
 // Create our Tetraminos.
@@ -47,7 +49,7 @@ function runGame () {
     // FIXME: Remove this later.
     dumpPieces(game.sprites)
 
-    // Hookup keyboard events.
+    // Hook up keyboard events.
     enableKeyboardEvents(game)
 
     // Start the game loop.
@@ -59,12 +61,12 @@ function runGameLoop (game) {
   // Let’s do this.
   moveAndRotatePiece(game)
   moveEverything(game)
-  drawPieces(game)
+  drawEverything(game)
 
   game.stats.runtime = Date.now() - game.stats.runningSince
   if (game.stats.runtime > MAX_RUNTIME) {
     stopGame(game)
-  } else {
+  } else if (game.running) {
     window.requestAnimationFrame(() => runGameLoop(game))
   }
 }
@@ -89,13 +91,39 @@ function moveEverything (game) {
     game.current.row += rowsRemaining
     game.all.push(game.current)
     game.current = getPieceFromBag(game)
+    addShapeToBoard(game, info)
   }
 }
 
+function addShapeToBoard (game, info) {
+  info.shape.grid.forEach((shapeRow, shapeRowIndex) => {
+    shapeRow.forEach((shapeCol, shapeColIndex) => {
+      if (shapeCol === 1) {
+        const gridRow = info.row + shapeRowIndex
+        const gridCol = info.col + shapeColIndex
+        game.board.grid[gridRow][gridCol] = { color: info.color }
+      }
+    })
+  })
+  console.log('game.board.grid:', game.board.grid)
+  stopGame(game)
+}
+
+function drawEverything (game) {
+  // Clear first.
+  ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
+
+  // Draw all the things.
+  game.all.concat(game.current).forEach(piece => {
+    const info = getPieceInfo(game, piece)
+    drawShape(game.sprites, info.shape, info.x, info.y)
+  })
+}
+
 function createNewGame (resources) {
-  const boardCols = 10
-  const boardRows = 22
-  const bag = getRandomBagOfTetraminos().slice(0, 5)
+  // Creates a new game, including a bag of tetraminos and a board with a
+  // blank grid.
+  const bag = getRandomBagOfTetraminos()
 
   const game = {
     sprites: resources.images[0].image,
@@ -112,10 +140,11 @@ function createNewGame (resources) {
     board: {
       x: BOARD_WIDTH,
       y: 0,
-      w: boardCols * B2,
-      h: boardRows * B2,
-      cols: boardCols,
-      rows: boardRows
+      w: BOARD_COLS * B2,
+      h: BOARD_ROWS * B2,
+      cols: BOARD_COLS,
+      rows: BOARD_ROWS,
+      grid: createBoardGrid()
     },
     ticks: 0,
     speed: STARTING_GAME_SPEED,
@@ -174,14 +203,16 @@ function getPieceFromBag (game) {
     // Keep the last 2 pieces and add a bunch of new ones.
     game.bag = game.bag.slice(-2).concat(getRandomBagOfTetraminos())
     game.index = 0
-    console.log('Generated new bag.')
+    console.log('Generated new bag:', game.bag)
   }
 
   const piece = {
     type: game.bag[game.index],
     rotation: 1,
     row: 0,
-    col: 0
+    col: 0,
+    x: 0,
+    y: 0
   }
 
   // Start this piece right smack in the middle.
@@ -193,13 +224,16 @@ function getPieceFromBag (game) {
 }
 
 function getPieceInfo (game, piece) {
-  const shapeId = piece.type + piece.rotation
-  const shape = TETRAS.all[shapeId]
+  const id = piece.type + piece.rotation
+  const shape = TETRAS.all[id]
   return {
-    shapeId,
+    id,
+    shape,
     color: shape.color,
     cols: shape.cols,
     rows: shape.rows,
+    col: piece.col,
+    row: piece.row,
     w: shape.cols * B2,
     h: shape.rows * B2,
     x: game.board.x + piece.col * B2,
@@ -227,96 +261,108 @@ function moveAndRotatePiece (game) {
   }
 }
 
-function drawPieces (game) {
-  // Clear first.
-  ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
-
-  // Draw all the things.
-  game.all.concat(game.current).forEach(piece => {
-    const info = getPieceInfo(game, piece)
-    const shape = TETRAS.all[info.shapeId]
-    drawShape(game.sprites, shape, info.x, info.y)
-  })
-}
-
-function range (min, max) {
-  return [
-    ...new Array(Math.floor(Math.random() * max) + min)
-  ]
-  .map((x, i) => i + 1)
-}
-
 function getRandomBagOfTetraminos () {
   const shapes = FORCE_SHAPES || Object.keys(TETRAS.shapes)
-  return shuffle(
-    shapes.reduce((acc, pieceName) => {
-      return acc.concat(range(5, 10).map(() => pieceName))
-    }, [])
+  return shuffle(shapes)
+}
+
+// @params sprites, shape, offsetX, offsetY, gridX, gridY.
+function drawBlockOnGrid (sprites, s, ox, oy, gx, gy) {
+  ctx.drawImage(
+    sprites,
+    s.x, s.y, BZ, BZ,
+    ox + gx * B2, oy + gy * B2, B2, B2
   )
 }
 
-function loadResources (images, sounds) {
-  const promises = []
-
-  // Load sprites.
-  images.forEach(x => promises.push(loadImage(x.id, x.url)))
-
-  // Load all sounds.
-  sounds.forEach(x => promises.push(loadSoundBuffer(x.id, x.url)))
-
-  return Promise.all(promises).then(res => ({
-    images: [res[0]],
-    sounds: res.slice(1)
-  }))
+function drawShape (sprites, shape, offsetX, offsetY) {
+  const block = TETRAS.colors[shape.color]
+  shape.grid.forEach((row, y) => {
+    row.forEach((col, x) => {
+      if (col === 1) drawBlockOnGrid(sprites, block, offsetX, offsetY, x, y)
+    })
+  })
 }
 
-function enableKeyboardEvents (game) {
-  document.onkeydown = function (event) {
-    if (!event) {
-      event = window.event
-    }
-    let code = event.keyCode
-    if (event.charCode && code === 0) {
-      code = event.charCode
-    }
-    switch (code) {
-      case 37:
-        game.inputs.keyBuffer.push('left')
-        break
-      case 38:
-      case 16:
-        game.inputs.keyBuffer.push('up')
-        break
-      case 39:
-        game.inputs.keyBuffer.push('right')
-        break
-      case 40:
-        game.inputs.keyBuffer.push('down')
-        break
-      default:
-        console.log('Got char code:', code)
-    }
-    // event.preventDefault()
+function dumpPieces (sprites) {
+  let offsetX = 0
+  let offsetY = 0
+  Object.keys(TETRAS.all).forEach(id => {
+    const shape = TETRAS.all[id]
+    drawShape(sprites, shape, offsetX, offsetY)
+    offsetY += shape.rows * B2
+  })
+}
+
+function playSoundInGame (id, game) {
+  const sound = game.sounds.find(x => x.id === id)
+  if (sound) {
+    const source = audioCtx.createBufferSource()
+    source.buffer = sound.buffer
+    source.connect(audioCtx.destination)
+    source.start(0)
+    game.soundsPlaying[id] = source
   }
 }
 
-function shuffle (array) {
-  let currentIndex = array.length
-  let temporaryValue
-  let randomIndex
+/*
+ * ===========================================================================
+ * ===========================================================================
+ *
+ * Util functions.
+ *
+ * ===========================================================================
+ * ===========================================================================
+ */
 
-  // While there remain elements to shuffle...
-  while (currentIndex !== 0) {
-    // Pick a remaining element...
-    randomIndex = Math.floor(Math.random() * currentIndex)
-    currentIndex -= 1
+function loadImage (id, url) {
+  return new Promise(resolve => {
+    const img = new Image()
+    console.log('Loading image:', url)
+    img.onload = () => resolve(img)
+    img.src = url
+  })
+  .then(image => {
+    console.log(`Loaded image: ${url} (${id}) successfully.`)
+    return { id, url, image }
+  })
+}
 
-    // And swap it with the current element.
-    temporaryValue = array[currentIndex]
-    array[currentIndex] = array[randomIndex]
-    array[randomIndex] = temporaryValue
-  }
-  return array
+function loadSoundBuffer (id, url) {
+  return new Promise((resolve, reject) => {
+    // Load buffer asynchronously
+    const request = new XMLHttpRequest()
+    request.open('GET', url, true)
+    request.responseType = 'arraybuffer'
+    request.onload = function () {
+      // Asynchronously decode the audio file data in request.response
+      audioCtx.decodeAudioData(
+        request.response,
+        function (buffer) {
+          if (!buffer) {
+            return reject(new Error('error decoding file data: ' + url))
+          }
+          resolve(buffer)
+        },
+        function (error) {
+          reject(new Error('decode audio error: ' + error))
+        }
+      )
+    }
+    request.onerror = function (error) {
+      reject(new Error('load sound buffer XHR error:', error))
+    }
+    console.log('Loading sound:', url)
+    request.send()
+  })
+  .then(buffer => {
+    console.log(`Loaded sound: ${url} (${id}) successfully.`)
+    return { id, url, buffer }
+  })
+}
+
+function range (max) {
+  return [...new Array(max)].map((x, i) => i + 1)
 }
 
 function createTetraminos () {
@@ -367,87 +413,70 @@ function createTetraminos () {
   }
 }
 
-// @params sprites, shape, offsetX, offsetY, gridX, gridY.
-function drawBlockOnGrid (sprites, s, ox, oy, gx, gy) {
-  ctx.drawImage(
-    sprites,
-    s.x, s.y, BZ, BZ,
-    ox + gx * B2, oy + gy * B2, B2, B2
-  )
+function shuffle (array) {
+  let currentIndex = array.length
+  let temporaryValue
+  let randomIndex
+
+  // While there remain elements to shuffle...
+  while (currentIndex !== 0) {
+    // Pick a remaining element...
+    randomIndex = Math.floor(Math.random() * currentIndex)
+    currentIndex -= 1
+
+    // And swap it with the current element.
+    temporaryValue = array[currentIndex]
+    array[currentIndex] = array[randomIndex]
+    array[randomIndex] = temporaryValue
+  }
+  return array
 }
 
-function drawShape (sprites, shape, offsetX, offsetY) {
-  const block = TETRAS.colors[shape.color]
-  shape.grid.forEach((row, y) => {
-    row.forEach((col, x) => {
-      if (col === 1) drawBlockOnGrid(sprites, block, offsetX, offsetY, x, y)
-    })
-  })
-}
-
-function dumpPieces (sprites) {
-  let offsetX = 0
-  let offsetY = 0
-  Object.keys(TETRAS.all).forEach(id => {
-    const shape = TETRAS.all[id]
-    drawShape(sprites, shape, offsetX, offsetY)
-    offsetY += shape.rows * B2
-  })
-}
-
-function loadImage (id, url) {
-  return new Promise(resolve => {
-    const img = new Image()
-    console.log('Loading image:', url)
-    img.onload = () => resolve(img)
-    img.src = url
-  })
-  .then(image => {
-    console.log(`Loaded image: ${url} (${id}) successfully.`)
-    return { id, url, image }
-  })
-}
-
-function playSoundInGame (id, game) {
-  const sound = game.sounds.find(x => x.id === id)
-  if (sound) {
-    const source = audioCtx.createBufferSource()
-    source.buffer = sound.buffer
-    source.connect(audioCtx.destination)
-    source.start(0)
-    game.soundsPlaying[id] = source
+function enableKeyboardEvents (game) {
+  document.onkeydown = function (event) {
+    if (!event) {
+      event = window.event
+    }
+    let code = event.keyCode
+    if (event.charCode && code === 0) {
+      code = event.charCode
+    }
+    switch (code) {
+      case 37:
+        game.inputs.keyBuffer.push('left')
+        break
+      case 38:
+      case 16:
+        game.inputs.keyBuffer.push('up')
+        break
+      case 39:
+        game.inputs.keyBuffer.push('right')
+        break
+      case 40:
+        game.inputs.keyBuffer.push('down')
+        break
+      default:
+        console.log('Got char code:', code)
+    }
+    // event.preventDefault()
   }
 }
 
-function loadSoundBuffer (id, url) {
-  return new Promise((resolve, reject) => {
-    // Load buffer asynchronously
-    const request = new XMLHttpRequest()
-    request.open('GET', url, true)
-    request.responseType = 'arraybuffer'
-    request.onload = function () {
-      // Asynchronously decode the audio file data in request.response
-      audioCtx.decodeAudioData(
-        request.response,
-        function (buffer) {
-          if (!buffer) {
-            return reject(new Error('error decoding file data: ' + url))
-          }
-          resolve(buffer)
-        },
-        function (error) {
-          reject(new Error('decode audio error: ' + error))
-        }
-      )
-    }
-    request.onerror = function (error) {
-      reject(new Error('load sound buffer XHR error:', error))
-    }
-    console.log('Loading sound:', url)
-    request.send()
-  })
-  .then(buffer => {
-    console.log(`Loaded sound: ${url} (${id}) successfully.`)
-    return { id, url, buffer }
-  })
+function loadResources (images, sounds) {
+  const promises = []
+
+  // Load sprites.
+  images.forEach(x => promises.push(loadImage(x.id, x.url)))
+
+  // Load all sounds.
+  sounds.forEach(x => promises.push(loadSoundBuffer(x.id, x.url)))
+
+  return Promise.all(promises).then(res => ({
+    images: [res[0]],
+    sounds: res.slice(1)
+  }))
+}
+
+function createBoardGrid () {
+  return range(BOARD_ROWS).map(() => range(BOARD_COLS).map(() => null))
 }
