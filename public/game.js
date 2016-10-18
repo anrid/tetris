@@ -40,6 +40,8 @@ window.onload = runGame
 
 function runGame () {
   console.log('Loading Tetris ..')
+  compareShapeAndBoardGridsTest()
+
   loadResources(IMAGES, SOUNDS)
   .then(resources => {
     console.log('Tetris loaded.')
@@ -78,46 +80,106 @@ function moveEverything (game) {
     game.ticks = 0
     game.current.row++
   }
+
   const info = getPieceInfo(game, game.current)
 
   // Ensure that piece fits on X-axis.
   const colsRemaining = game.board.cols - info.cols - game.current.col
   if (colsRemaining < 0) game.current.col += colsRemaining
 
-  // No rows remaining ? Time for a new piece.
+  // Don’t allow the current piece to ever go past the bottom.
   const rowsRemaining = game.board.rows - info.rows - game.current.row
-  if (rowsRemaining <= 0) {
-    // Don’t allow the current piece to ever go past the bottom.
-    game.current.row += rowsRemaining
-    game.all.push(game.current)
-    game.current = getPieceFromBag(game)
-    addShapeToBoard(game, info)
-  }
-}
+  if (rowsRemaining <= 0) game.current.row += rowsRemaining
 
-function addShapeToBoard (game, info) {
-  info.shape.grid.forEach((shapeRow, shapeRowIndex) => {
-    shapeRow.forEach((shapeCol, shapeColIndex) => {
-      if (shapeCol === 1) {
-        const gridRow = info.row + shapeRowIndex
-        const gridCol = info.col + shapeColIndex
-        game.board.grid[gridRow][gridCol] = { color: info.color }
-      }
-    })
-  })
-  console.log('game.board.grid:', game.board.grid)
-  stopGame(game)
+  // game.all.push(game.current)
+  // game.current = getPieceFromBag(game)
+  const result = compareShapeAndBoardGrids(
+    info.shape.grid,
+    game.board.grid,
+    game.current.row,
+    game.current.col
+  )
+
+  if (result.touch.below && result.fits) {
+    result.slots.forEach(x => game.board.grid[x[0]][x[1]] = { color: info.color })
+    game.current = getPieceFromBag(game)
+  }
 }
 
 function drawEverything (game) {
   // Clear first.
   ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
 
-  // Draw all the things.
-  game.all.concat(game.current).forEach(piece => {
-    const info = getPieceInfo(game, piece)
-    drawShape(game.sprites, info.shape, info.x, info.y)
+  // Draw stuff on the grid.
+  game.board.grid.forEach((row, gridRow) => {
+    row.forEach((col, gridCol) => {
+      if (col) {
+        const block = TETRAS.colors[col.color]
+        drawBlockOnGrid(game.sprites, block, game.board.x, game.board.y, gridCol, gridRow)
+      }
+    })
   })
+
+  // Draw the current piece.
+  const info = getPieceInfo(game, game.current)
+  drawShape(game.sprites, info.shape, info.x, info.y)
+}
+
+function compareShapeAndBoardGrids (shape, board, boardRowOffset, boardColOffset) {
+  const res = {
+    fits: false,
+    size: 0,
+    slots: [],
+    touch: { }
+  }
+  shape.forEach((shapeRow, shapeRowIndex) => {
+    shapeRow.forEach((shapeCol, shapeColIndex) => {
+      if (shapeCol) {
+        res.size++
+        const boardRow = boardRowOffset + shapeRowIndex
+        const boardCol = boardColOffset + shapeColIndex
+        // Skip this slot if it’s outside the grid.
+        if ((boardRow < 0 || boardRow >= board.length) ||
+            (boardCol < 0 || boardCol >= board[0].length)) {
+          return
+        }
+
+        const slot = board[boardRow][boardCol]
+        if (slot) {
+          // Skip if slot is taken.
+          return
+        }
+        res.slots.push([boardRow, boardCol])
+
+        // Check if shape touches anything from above.
+        if (!(shapeRowIndex > 0 && shape[shapeRowIndex - 1][shapeColIndex])) {
+          if (boardRow === 0 || (boardRow > 0 && board[boardRow - 1][boardCol])) {
+            res.touch.above = true
+          }
+        }
+        // Check if shape touches anything from below.
+        if (!(shapeRowIndex + 1 < shape.length && shape[shapeRowIndex + 1][shapeColIndex])) {
+          if (boardRow === board.length - 1 || (boardRow + 1 < board.length && board[boardRow + 1][boardCol])) {
+            res.touch.below = true
+          }
+        }
+        // Check if shape touches anything from left.
+        if (!(shapeColIndex > 0 && shape[shapeRowIndex][shapeColIndex - 1])) {
+          if (boardCol === 0 || (boardCol > 0 && board[boardRow][boardCol - 1])) {
+            res.touch.left = true
+          }
+        }
+        // Check if shape touches anything from right.
+        if (!(shapeColIndex + 1 < shape[0].length && shape[shapeRowIndex][shapeColIndex + 1])) {
+          if (boardCol === board[0].length - 1 || (boardCol + 1 < board[0].length && board[boardRow][boardCol + 1])) {
+            res.touch.right = true
+          }
+        }
+      }
+    })
+  })
+  res.fits = res.size === res.slots.length
+  return res
 }
 
 function createNewGame (resources) {
@@ -210,9 +272,7 @@ function getPieceFromBag (game) {
     type: game.bag[game.index],
     rotation: 1,
     row: 0,
-    col: 0,
-    x: 0,
-    y: 0
+    col: 0
   }
 
   // Start this piece right smack in the middle.
@@ -266,12 +326,12 @@ function getRandomBagOfTetraminos () {
   return shuffle(shapes)
 }
 
-// @params sprites, shape, offsetX, offsetY, gridX, gridY.
-function drawBlockOnGrid (sprites, s, ox, oy, gx, gy) {
+// @params sprites, block, offsetX (px), offsetY (px), gridCol, gridRow.
+function drawBlockOnGrid (sprites, block, offsetX, offsetY, gridCol, gridRow) {
   ctx.drawImage(
     sprites,
-    s.x, s.y, BZ, BZ,
-    ox + gx * B2, oy + gy * B2, B2, B2
+    block.x, block.y, BZ, BZ,
+    offsetX + gridCol * B2, offsetY + gridRow * B2, B2, B2
   )
 }
 
@@ -479,4 +539,45 @@ function loadResources (images, sounds) {
 
 function createBoardGrid () {
   return range(BOARD_ROWS).map(() => range(BOARD_COLS).map(() => null))
+}
+
+function assert (exp, message = 'Assertion error') {
+  if (!exp) throw new Error(message)
+}
+
+function compareShapeAndBoardGridsTest () {
+  let r
+  const shape1 = TETRAS.all.SL1 // Green horizontal SL.
+  const board1 = [[0, 0, 1, 0],
+                  [0, 0, 1, 0],
+                  [0, 0, 0, 0],
+                  [0, 0, 0, 0]]
+
+  r = compareShapeAndBoardGrids(shape1.grid, board1, 0, 0)
+  assert(!r.fits && r.touch.above && r.touch.left && !r.touch.below && r.touch.right)
+  r = compareShapeAndBoardGrids(shape1.grid, board1, 1, 0)
+  assert(r.fits && r.touch.above && r.touch.left && !r.touch.below && r.touch.right)
+  r = compareShapeAndBoardGrids(shape1.grid, board1, 2, 1)
+  assert(r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
+
+  const shape2 = TETRAS.all.SL2 // Green vertical SL.
+  r = compareShapeAndBoardGrids(shape2.grid, board1, 1, 2)
+  assert(r.fits && r.touch.above && r.touch.left && r.touch.below && r.touch.right)
+  r = compareShapeAndBoardGrids(shape2.grid, board1, 1, 0)
+  assert(r.fits && !r.touch.above && r.touch.left && r.touch.below && r.touch.right)
+
+  const shape3 = TETRAS.all.LB1 // Red horizontal LB.
+  r = compareShapeAndBoardGrids(shape3.grid, board1, 3, 0)
+  assert(r.fits && !r.touch.above && r.touch.left && r.touch.below && r.touch.right)
+  const shape4 = TETRAS.all.LB2 // Red vertical LB.
+  r = compareShapeAndBoardGrids(shape4.grid, board1, 0, 3)
+  assert(r.fits && r.touch.above && r.touch.left && r.touch.below && r.touch.right)
+
+  const shape5 = TETRAS.all.CU1 // Yellow cube.
+  r = compareShapeAndBoardGrids(shape5.grid, board1, 2, 0)
+  assert(r.fits && !r.touch.above && r.touch.left && r.touch.below && !r.touch.right)
+  r = compareShapeAndBoardGrids(shape5.grid, board1, 2, 2)
+  assert(r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
+
+  console.log('All grid tests pass ok.')
 }
