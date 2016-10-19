@@ -2,30 +2,41 @@
 'use strict'
 
 const BOARD_COLS = 10
-const BOARD_ROWS = 22
-const BOARD_HEIGHT = 864 / 2
-const BOARD_WIDTH = 832 / 2
+const BOARD_ROWS = 20
+// const BOARD_HEIGHT = 432 / 2
+// const BOARD_WIDTH = 416 / 2
+const BOARD_OFFSET_X = 0
 const SCALE = 2
 const BZ = 8
 const B2 = BZ * SCALE
-const STARTING_GAME_SPEED = 1 / 4
-const MAX_RUNTIME = 60000
+const STARTING_GAME_SPEED = 1 / 10
+const MAX_RUNTIME = false // 60000
+
 // NOTE: Use this to force shapes during testing.
-const FORCE_SHAPES = false // ['LB', 'LB', 'LB', 'LB']
-const ENABLE_SOUND = false
+const FORCE_SHAPES = false // ['LL', 'LR', 'LL', 'LR']
 
 const IMAGES = [
   { id: 'gameSprites', url: '/tetris.png' }
 ]
+
+// Sound.
+const ENABLE_SOUND = true
+const PLAYLIST = [ 'bgMusic1', 'bgMusic3' ]
 const SOUNDS = [
-  // { id: 'bgMusic1', url: '/sounds/dk-main.mp3' }
-  // { id: 'bgMusic2', url: '/sounds/dk-start.mp3' },
-  // { id: 'bgMusic3', url: '/sounds/dk-howhigh.mp3' },
-  // { id: 'bgMusic4', url: '/sounds/dk-hammer.mp3' }
-  // { id: 'bgMusic1', url: '/sounds/bg-music-01.mp3' },
-  // { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3' },
-  // { id: 'bgMusic3', url: '/sounds/bg-music-03.mp3' },
-  // { id: 'bgMusic4', url: '/sounds/bg-music-04.mp3' }
+  { id: 'intro1', url: '/sounds/dk-main.mp3', load: true },
+  { id: 'intro2', url: '/sounds/dk-start.mp3', load: true },
+  { id: 'intro3', url: '/sounds/dk-howhigh.mp3', load: false },
+  { id: 'intro4', url: '/sounds/dk-hammer.mp3', load: false },
+  { id: 'bgMusic1', url: '/sounds/bg-music-01.mp3', load: true },
+  { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3', load: false },
+  { id: 'bgMusic3', url: '/sounds/bg-music-03.mp3', load: true },
+  { id: 'bgMusic4', url: '/sounds/bg-music-04.mp3', load: false },
+  { id: 'click1', url: '/sounds/click1.wav', load: true },
+  { id: 'click2', url: '/sounds/click2.wav', load: true },
+  { id: 'click3', url: '/sounds/click3.wav', load: true },
+  { id: 'click4', url: '/sounds/click4.wav', load: true },
+  { id: 'click5', url: '/sounds/click5.wav', load: true },
+  { id: 'click6', url: '/sounds/click6.wav', load: true }
 ]
 
 // Create our Tetraminos.
@@ -33,7 +44,7 @@ const TETRAS = createTetraminos('LB')
 
 const ctx = document.getElementById('game').getContext('2d')
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-// ctx.globalCompositeOperation = 'destination-over'
+const lowVolumeNode = createVolumeNode(0.8)
 
 // Run game on load.
 window.onload = runGame
@@ -42,17 +53,24 @@ function runGame () {
   console.log('Loading Tetris ..')
   compareShapeAndBoardGridsTest()
 
-  loadResources(IMAGES, SOUNDS)
+  loadResources()
   .then(resources => {
     console.log('Tetris loaded.')
     // Create a new game.
     const game = createNewGame(resources)
 
     // FIXME: Remove this later.
-    dumpPieces(game.sprites)
+    // dumpPieces(game.sprites)
 
     // Hook up keyboard events.
     enableKeyboardEvents(game)
+    enableGameButtons(game)
+
+    window.handleButton = (name) => {
+      if (name === 'stop') {
+        stopGame(game)
+      }
+    }
 
     // Start the game loop.
     window.requestAnimationFrame(() => runGameLoop(game))
@@ -66,7 +84,7 @@ function runGameLoop (game) {
   drawEverything(game)
 
   game.stats.runtime = Date.now() - game.stats.runningSince
-  if (game.stats.runtime > MAX_RUNTIME) {
+  if (MAX_RUNTIME && game.stats.runtime > MAX_RUNTIME) {
     stopGame(game)
   } else if (game.running) {
     window.requestAnimationFrame(() => runGameLoop(game))
@@ -75,24 +93,15 @@ function runGameLoop (game) {
 
 function moveEverything (game) {
   // Move everything along !
-  game.ticks += game.speed
+  let moveDown = false
+  game.ticks += (game.inputs.pushDown ? game.speed * 10 : game.speed)
   if (game.ticks > 1.0) {
     game.ticks = 0
-    game.current.row++
+    moveDown = true
   }
 
   const info = getPieceInfo(game, game.current)
 
-  // Ensure that piece fits on X-axis.
-  const colsRemaining = game.board.cols - info.cols - game.current.col
-  if (colsRemaining < 0) game.current.col += colsRemaining
-
-  // Don’t allow the current piece to ever go past the bottom.
-  const rowsRemaining = game.board.rows - info.rows - game.current.row
-  if (rowsRemaining <= 0) game.current.row += rowsRemaining
-
-  // game.all.push(game.current)
-  // game.current = getPieceFromBag(game)
   const result = compareShapeAndBoardGrids(
     info.shape.grid,
     game.board.grid,
@@ -100,29 +109,84 @@ function moveEverything (game) {
     game.current.col
   )
 
-  if (result.touch.below && result.fits) {
-    result.slots.forEach(x => game.board.grid[x[0]][x[1]] = { color: info.color })
-    game.current = getPieceFromBag(game)
+  if (!result.fits && game.current.row === 0) {
+    // End game !
+    console.log('It’s a Done Deal.')
+    stopGame(game)
+    return
+  }
+
+  if (result.touch.below) {
+    // We’ve hit something below. Delay for a bit then lock
+    // the current piece to the board.
+    if (++game.current.delay > 30) {
+      if (result.fits) {
+        result.slots.forEach(x => game.board.grid[x[0]][x[1]] = { color: info.color })
+        game.current = getPieceFromBag(game)
+      }
+    }
+  } else if (result.fits && moveDown) {
+    // We’re still free to move downwards.
+    game.current.row++
   }
 }
 
-function drawEverything (game) {
-  // Clear first.
+function redrawBoard (game) {
+  // Clear canvas.
   ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
 
-  // Draw stuff on the grid.
-  game.board.grid.forEach((row, gridRow) => {
-    row.forEach((col, gridCol) => {
-      if (col) {
-        const block = TETRAS.colors[col.color]
-        drawBlockOnGrid(game.sprites, block, game.board.x, game.board.y, gridCol, gridRow)
+  // Draw frame.
+  const frameW1 = (BOARD_COLS + 2) * BZ
+  const frameH1 = (BOARD_ROWS + 3) * BZ
+  const frameW2 = (BOARD_COLS + 2) * B2
+  const frameH2 = (BOARD_ROWS + 3) * B2
+  ctx.drawImage(game.sprites,
+    0, 0, frameW1, frameH1,
+    game.board.x - B2, game.board.y - B2, frameW2, frameH2
+  )
+}
+
+function drawEverything (game) {
+  redrawBoard(game)
+
+  const info = getPieceInfo(game, game.current)
+
+  // Merge current piece with board.
+  info.shape.grid.forEach((row, rI) => {
+    row.forEach((col, cI) => {
+      if (col === 1) {
+        let gridRow = info.row + rI
+        let gridCol = info.col + cI
+        const invalidRow = gridRow < 0 || gridRow >= game.board.grid.length
+        const invalidCol = gridCol < 0 || gridCol >= game.board.grid[0].length
+        if (invalidRow || invalidCol) {
+          return
+        }
+        if (!game.board.grid[gridRow][gridCol]) {
+          game.board.grid[gridRow][gridCol] = { color: info.color, current: true }
+        }
       }
     })
   })
 
-  // Draw the current piece.
-  const info = getPieceInfo(game, game.current)
-  drawShape(game.sprites, info.shape, info.x, info.y)
+  // Draw the board grid.
+  game.board.grid.forEach((row, rI) => {
+    row.forEach((col, cI) => {
+      if (col) {
+        const block = TETRAS.colors[col.color]
+        drawBlockOnGrid(game.sprites, block, game.board.x, game.board.y, cI, rI)
+      }
+    })
+  })
+
+  // Clear current piece from board.
+  game.board.grid.forEach((row, rI) => {
+    row.forEach((col, cI) => {
+      if (col && col.current) {
+        row[cI] = null
+      }
+    })
+  })
 }
 
 function compareShapeAndBoardGrids (shape, board, boardRowOffset, boardColOffset) {
@@ -138,11 +202,40 @@ function compareShapeAndBoardGrids (shape, board, boardRowOffset, boardColOffset
         res.size++
         const boardRow = boardRowOffset + shapeRowIndex
         const boardCol = boardColOffset + shapeColIndex
+
         // Skip this slot if it’s outside the grid.
-        if ((boardRow < 0 || boardRow >= board.length) ||
-            (boardCol < 0 || boardCol >= board[0].length)) {
+        if (boardRow < 0) {
+          res.touch.above = true
           return
         }
+        if (boardRow >= board.length) {
+          res.touch.below = true
+          return
+        }
+        if (boardCol < 0) {
+          res.touch.left = true
+          return
+        }
+        if (boardCol >= board[0].length) {
+          res.touch.right = true
+          return
+        }
+
+        const selfAbove = shapeRowIndex > 0 && shape[shapeRowIndex - 1][shapeColIndex]
+        const selfBelow = shapeRowIndex + 1 < shape.length && shape[shapeRowIndex + 1][shapeColIndex]
+        const selfLeft = shapeColIndex > 0 && shape[shapeRowIndex][shapeColIndex - 1]
+        const selfRight = shapeColIndex + 1 < shape[0].length && shape[shapeRowIndex][shapeColIndex + 1]
+
+        const takenAbove = boardRow === 0 || (boardRow > 0 && board[boardRow - 1][boardCol])
+        const takenBelow = boardRow === board.length - 1 || (boardRow + 1 < board.length && board[boardRow + 1][boardCol])
+        const takenLeft = boardCol === 0 || (boardCol > 0 && board[boardRow][boardCol - 1])
+        const takenRight = boardCol === board[0].length - 1 || (boardCol + 1 < board[0].length && board[boardRow][boardCol + 1])
+
+        // Check if shape touches anything from above, below, left and right
+        if (!selfAbove && takenAbove) res.touch.above = true
+        if (!selfBelow && takenBelow) res.touch.below = true
+        if (!selfLeft && takenLeft) res.touch.left = true
+        if (!selfRight && takenRight) res.touch.right = true
 
         const slot = board[boardRow][boardCol]
         if (slot) {
@@ -150,36 +243,49 @@ function compareShapeAndBoardGrids (shape, board, boardRowOffset, boardColOffset
           return
         }
         res.slots.push([boardRow, boardCol])
-
-        // Check if shape touches anything from above.
-        if (!(shapeRowIndex > 0 && shape[shapeRowIndex - 1][shapeColIndex])) {
-          if (boardRow === 0 || (boardRow > 0 && board[boardRow - 1][boardCol])) {
-            res.touch.above = true
-          }
-        }
-        // Check if shape touches anything from below.
-        if (!(shapeRowIndex + 1 < shape.length && shape[shapeRowIndex + 1][shapeColIndex])) {
-          if (boardRow === board.length - 1 || (boardRow + 1 < board.length && board[boardRow + 1][boardCol])) {
-            res.touch.below = true
-          }
-        }
-        // Check if shape touches anything from left.
-        if (!(shapeColIndex > 0 && shape[shapeRowIndex][shapeColIndex - 1])) {
-          if (boardCol === 0 || (boardCol > 0 && board[boardRow][boardCol - 1])) {
-            res.touch.left = true
-          }
-        }
-        // Check if shape touches anything from right.
-        if (!(shapeColIndex + 1 < shape[0].length && shape[shapeRowIndex][shapeColIndex + 1])) {
-          if (boardCol === board[0].length - 1 || (boardCol + 1 < board[0].length && board[boardRow][boardCol + 1])) {
-            res.touch.right = true
-          }
-        }
       }
     })
   })
   res.fits = res.size === res.slots.length
   return res
+}
+
+function validateMove (game, type, rotation, row, column) {
+  const info = getPieceInfo(game, { type, rotation })
+  const result = compareShapeAndBoardGrids(
+    info.shape.grid,
+    game.board.grid,
+    row,
+    column
+  )
+  return result.fits
+}
+
+function moveAndRotatePiece (game) {
+  if (game.current) {
+    const shapeVariants = TETRAS.shapes[game.current.type].count
+    let rot = game.current.rotation
+    let col = game.current.col
+    let lastRot
+    let lastCol
+    game.inputs.keyBuffer.forEach(key => {
+      lastRot = rot
+      lastCol = col
+      if (key === 'up') rot--
+      if (key === 'down') rot++
+      if (rot < 1) rot = shapeVariants
+      if (rot > shapeVariants) rot = 1
+      if (key === 'left') col--
+      if (key === 'right') col++
+      if (!validateMove(game, game.current.type, rot, game.current.row, col)) {
+        rot = lastRot
+        col = lastCol
+      }
+    })
+    game.current.rotation = rot
+    game.current.col = col
+    game.inputs.keyBuffer = []
+  }
 }
 
 function createNewGame (resources) {
@@ -192,16 +298,11 @@ function createNewGame (resources) {
     sounds: resources.sounds,
     soundsPlaying: { },
     // Shuffled background music playlist.
-    musicPlaylist: shuffle([
-      'bgMusic1',
-      'bgMusic2',
-      'bgMusic3',
-      'bgMusic4'
-    ]),
+    musicPlaylist: shuffle(PLAYLIST),
     musicPlaylistIndex: 0,
     board: {
-      x: BOARD_WIDTH,
-      y: 0,
+      x: BOARD_OFFSET_X + B2,
+      y: B2,
       w: BOARD_COLS * B2,
       h: BOARD_ROWS * B2,
       cols: BOARD_COLS,
@@ -247,7 +348,7 @@ function playBackgroundMusic (game) {
   const id = game.musicPlaylist[game.musicPlaylistIndex]
   console.log('Playing background music:', id)
 
-  playSoundInGame(id, game)
+  playSoundInGame(game, id)
   game.soundsPlaying[id].onended = () => {
     console.log('Background music ended.')
     if (game.running) {
@@ -272,7 +373,8 @@ function getPieceFromBag (game) {
     type: game.bag[game.index],
     rotation: 1,
     row: 0,
-    col: 0
+    col: 0,
+    delay: 0
   }
 
   // Start this piece right smack in the middle.
@@ -298,26 +400,6 @@ function getPieceInfo (game, piece) {
     h: shape.rows * B2,
     x: game.board.x + piece.col * B2,
     y: game.board.y + piece.row * B2
-  }
-}
-
-function moveAndRotatePiece (game) {
-  if (game.current) {
-    const numShapes = TETRAS.shapes[game.current.type].count
-    // console.log('move: col=', game.current.col, 'max=', maxCols)
-    let r = game.current.rotation
-    let col = game.current.col
-    game.inputs.keyBuffer.forEach(key => {
-      if (key === 'up') r--
-      if (key === 'down') r++
-      if (r < 1) r = numShapes
-      if (r > numShapes) r = 1
-      if (key === 'left' && col > 0) col--
-      if (key === 'right' && col < game.board.cols) col++
-      game.current.rotation = r
-      game.current.col = col
-    })
-    game.inputs.keyBuffer = []
   }
 }
 
@@ -354,12 +436,16 @@ function dumpPieces (sprites) {
   })
 }
 
-function playSoundInGame (id, game) {
+function playSoundInGame (game, id, opts = { }) {
   const sound = game.sounds.find(x => x.id === id)
   if (sound) {
     const source = audioCtx.createBufferSource()
     source.buffer = sound.buffer
-    source.connect(audioCtx.destination)
+    if (opts.lowVolume) {
+      source.connect(lowVolumeNode)
+    } else {
+      source.connect(audioCtx.destination)
+    }
     source.start(0)
     game.soundsPlaying[id] = source
   }
@@ -493,7 +579,7 @@ function shuffle (array) {
 }
 
 function enableKeyboardEvents (game) {
-  document.onkeydown = function (event) {
+  document.onkeyup = (event) => {
     if (!event) {
       event = window.event
     }
@@ -502,34 +588,66 @@ function enableKeyboardEvents (game) {
       code = event.charCode
     }
     switch (code) {
+      case 32:
+        game.inputs.pushDown = false
+        break
+      default:
+        // console.log('Key up:', code)
+    }
+  }
+
+  document.onkeydown = (event) => {
+    if (!event) {
+      event = window.event
+    }
+    let code = event.keyCode
+    if (event.charCode && code === 0) {
+      code = event.charCode
+    }
+    if (game.inputs.keyBuffer.length > 3) return
+
+    switch (code) {
+      case 32:
+        game.inputs.pushDown = true
+        break
       case 37:
         game.inputs.keyBuffer.push('left')
+        playSoundInGame(game, 'click1', { lowVolume: true })
         break
       case 38:
+        game.inputs.keyBuffer.push('up')
+        playSoundInGame(game, 'click2', { lowVolume: true })
+        break
       case 16:
         game.inputs.keyBuffer.push('up')
+        playSoundInGame(game, 'click5', { lowVolume: true })
         break
       case 39:
         game.inputs.keyBuffer.push('right')
+        playSoundInGame(game, 'click3', { lowVolume: true })
         break
       case 40:
         game.inputs.keyBuffer.push('down')
+        playSoundInGame(game, 'click4', { lowVolume: true })
         break
       default:
-        console.log('Got char code:', code)
+        console.log('Key down:', code)
     }
-    // event.preventDefault()
   }
 }
 
-function loadResources (images, sounds) {
+function loadResources () {
   const promises = []
 
   // Load sprites.
-  images.forEach(x => promises.push(loadImage(x.id, x.url)))
+  IMAGES.forEach(x => promises.push(loadImage(x.id, x.url)))
 
   // Load all sounds.
-  sounds.forEach(x => promises.push(loadSoundBuffer(x.id, x.url)))
+  SOUNDS.forEach(x => {
+    if (x.load) {
+      promises.push(loadSoundBuffer(x.id, x.url))
+    }
+  })
 
   return Promise.all(promises).then(res => ({
     images: [res[0]],
@@ -547,12 +665,13 @@ function assert (exp, message = 'Assertion error') {
 
 function compareShapeAndBoardGridsTest () {
   let r
-  const shape1 = TETRAS.all.SL1 // Green horizontal SL.
+
   const board1 = [[0, 0, 1, 0],
                   [0, 0, 1, 0],
                   [0, 0, 0, 0],
                   [0, 0, 0, 0]]
 
+  const shape1 = TETRAS.all.SL1 // Green horizontal SL.
   r = compareShapeAndBoardGrids(shape1.grid, board1, 0, 0)
   assert(!r.fits && r.touch.above && r.touch.left && !r.touch.below && r.touch.right)
   r = compareShapeAndBoardGrids(shape1.grid, board1, 1, 0)
@@ -579,5 +698,28 @@ function compareShapeAndBoardGridsTest () {
   r = compareShapeAndBoardGrids(shape5.grid, board1, 2, 2)
   assert(r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
 
+  const shape6 = TETRAS.all.LR2 // Orange vertical LR.
+  r = compareShapeAndBoardGrids(shape6.grid, board1, -2, 2)
+  assert(!r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
+
   console.log('All grid tests pass ok.')
+}
+
+function enableGameButtons (game) {
+  window.handleButton = (name) => {
+    switch (name) {
+      case 'stop':
+        stopGame(game)
+        break
+      default:
+        console.log('Unhandled button click:', name)
+    }
+  }
+}
+
+function createVolumeNode (volume) {
+  const gainNode = audioCtx.createGain()
+  gainNode.gain.value = volume
+  gainNode.connect(audioCtx.destination)
+  return gainNode
 }

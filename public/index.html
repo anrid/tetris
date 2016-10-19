@@ -6,16 +6,30 @@
   <meta content="IE=edge;chrome=1" http-equiv="X-UA-Compatible" />
   <meta content="initial-scale=1, width=device-width, height=device-height" name="viewport" />
   <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+    }
     body * {
       box-sizing: border-box;
     }
     #game {
-      border: 2px solid gray;
+    }
+    .gameContainer {
+      margin: 50px;
+      display: flex;
+      justify-content: flex-start;
+      align-items: flex-start;
     }
   </style>
 </head>
 <body>
-  <canvas id="game" width="832" height="864"></canvas>
+  <section class="gameContainer">
+    <canvas id="game" width="416" height="432"></canvas>
+    <div>
+      <button onclick="handleButton('stop')">Stop Game</button>
+    </div>
+  </section>
   <script src="/game.js"></script>
 </body>
 </html>
