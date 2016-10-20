@@ -51,10 +51,6 @@ const TETRAS = createTetraminos('LB')
 
 const ctx = document.getElementById('game').getContext('2d')
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-const soundEffects = {
-  'volume75': createVolumeNode(0.8),
-  'volume50': createVolumeNode(0.6)
-}
 
 // Run game on load.
 window.onload = run
@@ -66,21 +62,29 @@ function run () {
 
   loadResources()
   .then(resources => {
-    console.log('Tetris loaded.')
-
-    // Create a new game.
-    const game = createNewGame(resources)
-
-    // FIXME: Remove this later.
-    // dumpPieces(game.sprites)
-
-    // Hook up keyboard events.
-    enableKeyboardEvents(game)
-    enableGameButtons(game)
-
-    // Start the game loop.
-    window.requestAnimationFrame(() => runGameLoop(game))
+    // Setup basic sound effects.
+    resources.effects = {
+      'volume75': createVolumeNode(0.8),
+      'volume50': createVolumeNode(0.6)
+    }
+    return resources
   })
+  .then(resources => {
+    console.log('Tetris loaded.')
+    startGame(resources)
+  })
+}
+
+function startGame (resources) {
+  // Create a new game.
+  const game = createNewGame(resources)
+
+  // Hook up keyboard events.
+  enableKeyboardEvents(game)
+  enableGameButtons(game)
+
+  // Start the game loop.
+  window.requestAnimationFrame(() => runGameLoop(game))
 }
 
 function runGameLoop (game) {
@@ -115,11 +119,13 @@ function moveEverything (game) {
     game.current.col
   )
 
-  if (!result.fits && game.current.row === 0) {
+  if (!result.fits && game.current.row < 0 && result.touch.below) {
     // End game !
     console.log('It’s a Done Deal.')
     stopGame(game)
-    playSoundInGame(game, 'gameover')
+    if (ENABLE_SOUND) {
+      playSoundInGame(game, 'gameover')
+    }
     return
   }
 
@@ -134,11 +140,12 @@ function moveEverything (game) {
         // How about a nice game of... Tetris ?
         const lines = checkLinesToSmash(game)
         if (lines) {
+          game.points += lines.points
           smashLines(game, lines.events)
         }
       }
     }
-  } else if (result.fits && moveDown) {
+  } else if ((game.current.row < 0 || result.fits) && moveDown) {
     // We’re still free to move downwards.
     game.current.row++
   }
@@ -188,7 +195,7 @@ function checkLinesToSmash (game) {
 }
 
 function redrawBoard (game) {
-  // Clear canvas.
+  // Clear board.
   ctx.clearRect(game.board.x, game.board.y, game.board.w, game.board.h)
 
   // Draw frame.
@@ -206,6 +213,23 @@ function drawEverything (game) {
   redrawBoard(game)
 
   const info = getPieceInfo(game, game.current)
+
+  // Draw points
+  const pointsX = game.board.x + game.board.w + 30
+  const pointsY = 30
+
+  ctx.save()
+  ctx.fillStyle = 'white'
+  ctx.fillRect(pointsX - 10, 10, 200, pointsY * 4)
+  ctx.restore()
+
+  ctx.save()
+  ctx.font = '24px "Press Start"'
+  ctx.textBaseline = 'top'
+  ctx.fillStyle = 'black'
+  ctx.fillText('Points:', pointsX, 10)
+  ctx.fillText(game.points, pointsX, 10 + pointsY)
+  ctx.restore()
 
   // Merge current piece with board.
   info.shape.grid.forEach((row, rI) => {
@@ -350,6 +374,7 @@ function createNewGame (resources) {
   const bag = getRandomBagOfTetraminos()
 
   const game = {
+    resources,
     sprites: resources.images[0].image,
     sounds: resources.sounds,
     soundsPlaying: { },
@@ -435,7 +460,9 @@ function getPieceFromBag (game) {
   }
 
   // Start this piece right smack in the middle.
-  piece.col = Math.floor(game.board.cols / 2 - getPieceInfo(game, piece).cols / 2)
+  const info = getPieceInfo(game, piece)
+  piece.col = Math.floor(game.board.cols / 2 - info.cols / 2)
+  piece.row = -info.rows
 
   game.index++
   console.log('Got new piece:', piece)
@@ -488,8 +515,8 @@ function playSoundInGame (game, id, opts = { }) {
   if (sound) {
     const source = audioCtx.createBufferSource()
     source.buffer = sound.buffer
-    if (opts.effect && soundEffects[opts.effect]) {
-      source.connect(soundEffects[opts.effect])
+    if (opts.effect && game.resources.effects[opts.effect]) {
+      source.connect(game.resources.effects[opts.effect])
     } else {
       source.connect(audioCtx.destination)
     }
@@ -647,62 +674,71 @@ function shuffle (array) {
   return array
 }
 
+function getEventCode (event) {
+  if (!event) {
+    event = window.event
+  }
+  let code = event.keyCode
+  if (event.charCode && code === 0) {
+    code = event.charCode
+  }
+  return code
+}
+
+function gameKeyUp (game, event) {
+  const code = getEventCode(event)
+  switch (code) {
+    case 32:
+      game.inputs.pushDown = false
+      break
+    default:
+      // console.log('Key up:', code)
+  }
+}
+
+function gameKeyDown (game, event) {
+  const code = getEventCode(event)
+  switch (code) {
+    case 32:
+      game.inputs.pushDown = true
+      break
+    case 37:
+      game.inputs.keyBuffer.push('left')
+      playSoundInGame(game, 'click1', { effect: 'volume75' })
+      break
+    case 38:
+      game.inputs.keyBuffer.push('up')
+      playSoundInGame(game, 'click2', { effect: 'volume75' })
+      break
+    case 16:
+      game.inputs.keyBuffer.push('up')
+      playSoundInGame(game, 'click5', { effect: 'volume75' })
+      break
+    case 39:
+      game.inputs.keyBuffer.push('right')
+      playSoundInGame(game, 'click3', { effect: 'volume75' })
+      break
+    case 40:
+      game.inputs.keyBuffer.push('down')
+      playSoundInGame(game, 'click4', { effect: 'volume75' })
+      break
+    default:
+      console.log('Key down:', code)
+  }
+}
+
+let _gameKeyUp
+let _gameKeyDown
+
 function enableKeyboardEvents (game) {
-  document.onkeyup = (event) => {
-    if (!event) {
-      event = window.event
-    }
-    let code = event.keyCode
-    if (event.charCode && code === 0) {
-      code = event.charCode
-    }
-    switch (code) {
-      case 32:
-        game.inputs.pushDown = false
-        break
-      default:
-        // console.log('Key up:', code)
-    }
-  }
+  document.removeEventListener('keyup', _gameKeyUp)
+  document.removeEventListener('keydown', _gameKeyDown)
 
-  document.onkeydown = (event) => {
-    if (!event) {
-      event = window.event
-    }
-    let code = event.keyCode
-    if (event.charCode && code === 0) {
-      code = event.charCode
-    }
-    if (game.inputs.keyBuffer.length > 3) return
+  _gameKeyUp = gameKeyUp.bind(null, game)
+  _gameKeyDown = gameKeyDown.bind(null, game)
 
-    switch (code) {
-      case 32:
-        game.inputs.pushDown = true
-        break
-      case 37:
-        game.inputs.keyBuffer.push('left')
-        playSoundInGame(game, 'click1', { effect: 'volume75' })
-        break
-      case 38:
-        game.inputs.keyBuffer.push('up')
-        playSoundInGame(game, 'click2', { effect: 'volume75' })
-        break
-      case 16:
-        game.inputs.keyBuffer.push('up')
-        playSoundInGame(game, 'click5', { effect: 'volume75' })
-        break
-      case 39:
-        game.inputs.keyBuffer.push('right')
-        playSoundInGame(game, 'click3', { effect: 'volume75' })
-        break
-      case 40:
-        game.inputs.keyBuffer.push('down')
-        playSoundInGame(game, 'click4', { effect: 'volume75' })
-        break
-      default:
-        console.log('Key down:', code)
-    }
-  }
+  document.addEventListener('keyup', _gameKeyUp)
+  document.addEventListener('keydown', _gameKeyDown)
 }
 
 function loadResources () {
@@ -798,7 +834,12 @@ function enableGameButtons (game) {
     switch (name) {
       case 'stop':
         stopGame(game)
-        playSoundInGame(game, 'gameover')
+        // playSoundInGame(game, 'gameover')
+        break
+      case 'restart':
+        stopGame(game)
+        startGame(game.resources)
+        // playSoundInGame(game, 'gameover')
         break
       default:
         console.log('Unhandled button click:', name)
