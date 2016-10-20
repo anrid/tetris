@@ -9,11 +9,13 @@ const BOARD_OFFSET_X = 0
 const SCALE = 2
 const BZ = 8
 const B2 = BZ * SCALE
-const STARTING_GAME_SPEED = 1 / 10
+const STARTING_GAME_SPEED = 1 / 9
 const MAX_RUNTIME = false // 60000
+// How long to wait before locking a piece in place.
+const PIECE_LOCK_DELAY = 40
 
 // NOTE: Use this to force shapes during testing.
-const FORCE_SHAPES = false // ['LL', 'LR', 'LL', 'LR']
+const FORCE_SHAPES = false // ['LB', 'LB', 'LB']
 
 const IMAGES = [
   { id: 'gameSprites', url: '/tetris.png' }
@@ -21,14 +23,15 @@ const IMAGES = [
 
 // Sound.
 const ENABLE_SOUND = true
-const PLAYLIST = [ 'bgMusic1', 'bgMusic3' ]
+const PLAYLIST = [ 'bgMusic1', 'bgMusic2', 'bgMusic3' ]
 const SOUNDS = [
   { id: 'intro1', url: '/sounds/dk-main.mp3', load: true },
   { id: 'intro2', url: '/sounds/dk-start.mp3', load: true },
   { id: 'intro3', url: '/sounds/dk-howhigh.mp3', load: false },
   { id: 'intro4', url: '/sounds/dk-hammer.mp3', load: false },
+  { id: 'gameover', url: '/sounds/dk-gameover.mp3', load: true },
   { id: 'bgMusic1', url: '/sounds/bg-music-01.mp3', load: true },
-  { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3', load: false },
+  { id: 'bgMusic2', url: '/sounds/bg-music-02.mp3', load: true },
   { id: 'bgMusic3', url: '/sounds/bg-music-03.mp3', load: true },
   { id: 'bgMusic4', url: '/sounds/bg-music-04.mp3', load: false },
   { id: 'click1', url: '/sounds/click1.wav', load: true },
@@ -36,7 +39,11 @@ const SOUNDS = [
   { id: 'click3', url: '/sounds/click3.wav', load: true },
   { id: 'click4', url: '/sounds/click4.wav', load: true },
   { id: 'click5', url: '/sounds/click5.wav', load: true },
-  { id: 'click6', url: '/sounds/click6.wav', load: true }
+  { id: 'click6', url: '/sounds/click6.wav', load: true },
+  { id: 'single', url: '/sounds/clear-single.ogg', load: true },
+  { id: 'double', url: '/sounds/clear-double.ogg', load: true },
+  { id: 'triple', url: '/sounds/clear-triple.ogg', load: true },
+  { id: 'tetris', url: '/sounds/clear-tetris.ogg', load: true }
 ]
 
 // Create our Tetraminos.
@@ -44,18 +51,23 @@ const TETRAS = createTetraminos('LB')
 
 const ctx = document.getElementById('game').getContext('2d')
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)()
-const lowVolumeNode = createVolumeNode(0.8)
+const soundEffects = {
+  'volume75': createVolumeNode(0.8),
+  'volume50': createVolumeNode(0.6)
+}
 
 // Run game on load.
-window.onload = runGame
+window.onload = run
 
-function runGame () {
+function run () {
   console.log('Loading Tetris ..')
   compareShapeAndBoardGridsTest()
+  smashLinesTest()
 
   loadResources()
   .then(resources => {
     console.log('Tetris loaded.')
+
     // Create a new game.
     const game = createNewGame(resources)
 
@@ -65,12 +77,6 @@ function runGame () {
     // Hook up keyboard events.
     enableKeyboardEvents(game)
     enableGameButtons(game)
-
-    window.handleButton = (name) => {
-      if (name === 'stop') {
-        stopGame(game)
-      }
-    }
 
     // Start the game loop.
     window.requestAnimationFrame(() => runGameLoop(game))
@@ -113,22 +119,72 @@ function moveEverything (game) {
     // End game !
     console.log('It’s a Done Deal.')
     stopGame(game)
+    playSoundInGame(game, 'gameover')
     return
   }
 
   if (result.touch.below) {
     // We’ve hit something below. Delay for a bit then lock
     // the current piece to the board.
-    if (++game.current.delay > 30) {
+    if (++game.current.delay > PIECE_LOCK_DELAY) {
       if (result.fits) {
         result.slots.forEach(x => game.board.grid[x[0]][x[1]] = { color: info.color })
         game.current = getPieceFromBag(game)
+
+        // How about a nice game of... Tetris ?
+        const lines = checkLinesToSmash(game)
+        if (lines) {
+          smashLines(game, lines.events)
+        }
       }
     }
   } else if (result.fits && moveDown) {
     // We’re still free to move downwards.
     game.current.row++
   }
+}
+
+function smashLines (game, events) {
+  events.forEach(event => {
+    playSoundInGame(game, event.name) // Play clearing sound effect at full volume.
+    event.group.forEach(rI => {
+      game.board.grid.splice(rI, 1)
+      game.board.grid.unshift(createBoardGridRow())
+    })
+  })
+}
+
+function checkLinesToSmash (game) {
+  const lines = game.board.grid.reduce((acc, row, rI) => {
+    if (row.every(x => x && x.color)) acc.push(rI)
+    return acc
+  }, [])
+
+  if (!lines.length) {
+    return
+  }
+
+  console.log('Smashing lines:', lines)
+  const linePoints = [40, 100, 300, 1200]
+  const lineNames = ['single', 'double', 'triple', 'tetris']
+
+  return lines.reduce((acc, lineIndex, i) => {
+    // console.log('lineIndex:', lineIndex, 'acc=', acc)
+    const isLineGroup = i < lines.length - 1 && lines[i + 1] === lineIndex + 1
+    if (!acc.group.length) acc.group.push(lineIndex)
+    if (isLineGroup && acc.size < 3) {
+      // console.log('grouping:', lineIndex)
+      acc.group.push(lineIndex + 1)
+      acc.size++
+      return acc
+    }
+    acc.points += linePoints[acc.size]
+    acc.events.push({ group: acc.group, name: lineNames[acc.size] })
+    // Clean up.
+    acc.size = 0
+    acc.group = []
+    return acc
+  }, { size: 0, group: [], points: 0, events: [] })
 }
 
 function redrawBoard (game) {
@@ -298,8 +354,9 @@ function createNewGame (resources) {
     sounds: resources.sounds,
     soundsPlaying: { },
     // Shuffled background music playlist.
-    musicPlaylist: shuffle(PLAYLIST),
+    musicPlaylist: PLAYLIST,
     musicPlaylistIndex: 0,
+    points: 0,
     board: {
       x: BOARD_OFFSET_X + B2,
       y: B2,
@@ -348,7 +405,7 @@ function playBackgroundMusic (game) {
   const id = game.musicPlaylist[game.musicPlaylistIndex]
   console.log('Playing background music:', id)
 
-  playSoundInGame(game, id)
+  playSoundInGame(game, id, { effect: 'volume50' })
   game.soundsPlaying[id].onended = () => {
     console.log('Background music ended.')
     if (game.running) {
@@ -426,23 +483,13 @@ function drawShape (sprites, shape, offsetX, offsetY) {
   })
 }
 
-function dumpPieces (sprites) {
-  let offsetX = 0
-  let offsetY = 0
-  Object.keys(TETRAS.all).forEach(id => {
-    const shape = TETRAS.all[id]
-    drawShape(sprites, shape, offsetX, offsetY)
-    offsetY += shape.rows * B2
-  })
-}
-
 function playSoundInGame (game, id, opts = { }) {
   const sound = game.sounds.find(x => x.id === id)
   if (sound) {
     const source = audioCtx.createBufferSource()
     source.buffer = sound.buffer
-    if (opts.lowVolume) {
-      source.connect(lowVolumeNode)
+    if (opts.effect && soundEffects[opts.effect]) {
+      source.connect(soundEffects[opts.effect])
     } else {
       source.connect(audioCtx.destination)
     }
@@ -460,6 +507,16 @@ function playSoundInGame (game, id, opts = { }) {
  * ===========================================================================
  * ===========================================================================
  */
+
+function dumpPieces (sprites) {
+  let offsetX = 0
+  let offsetY = 0
+  Object.keys(TETRAS.all).forEach(id => {
+    const shape = TETRAS.all[id]
+    drawShape(sprites, shape, offsetX, offsetY)
+    offsetY += shape.rows * B2
+  })
+}
 
 function loadImage (id, url) {
   return new Promise(resolve => {
@@ -516,7 +573,7 @@ function createTetraminos () {
 
   return {
     shapes: {
-      'LB': { count: 2 },
+      'LB': { count: 4 },
       'LL': { count: 4 },
       'LR': { count: 4 },
       'CU': { count: 1 },
@@ -536,25 +593,37 @@ function createTetraminos () {
       gray: createBlock(8)
     },
     all: {
-      'LB1': { color: 'red', grid: [[1, 1, 1, 1]], cols: 4, rows: 1 },
-      'LB2': { color: 'red', grid: [[1], [1], [1], [1]], cols: 1, rows: 4 },
-      'LL1': { color: 'blue', grid: [[1, 1, 1], [0, 0, 1]], cols: 3, rows: 2 },
-      'LL2': { color: 'blue', grid: [[0, 1], [0, 1], [1, 1]], cols: 2, rows: 3 },
-      'LL3': { color: 'blue', grid: [[1, 0, 0], [1, 1, 1]], cols: 3, rows: 2 },
-      'LL4': { color: 'blue', grid: [[1, 1], [1], [1]], cols: 2, rows: 3 },
-      'LR1': { color: 'orange', grid: [[0, 0, 1], [1, 1, 1]], cols: 3, rows: 2 },
-      'LR2': { color: 'orange', grid: [[1, 0], [1, 0], [1, 1]], cols: 2, rows: 3 },
-      'LR3': { color: 'orange', grid: [[1, 1, 1], [1, 0, 0]], cols: 3, rows: 2 },
-      'LR4': { color: 'orange', grid: [[1, 1], [0, 1], [0, 1]], cols: 2, rows: 3 },
+      'LB1': { color: 'red', grid: [[0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]], cols: 4, rows: 4 },
+      'LB2': { color: 'red', grid: [[0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0], [0, 0, 1, 0]], cols: 4, rows: 4 },
+      'LB3': { color: 'red', grid: [[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 1, 1], [0, 0, 0, 0]], cols: 4, rows: 4 },
+      'LB4': { color: 'red', grid: [[0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0], [0, 1, 0, 0]], cols: 4, rows: 4 },
+
+      'LL1': { color: 'blue', grid: [[1, 0, 0], [1, 1, 1], [0, 0, 0]], cols: 3, rows: 3 },
+      'LL2': { color: 'blue', grid: [[0, 1, 1], [0, 1, 0], [0, 1, 0]], cols: 3, rows: 3 },
+      'LL3': { color: 'blue', grid: [[0, 0, 0], [1, 1, 1], [0, 0, 1]], cols: 3, rows: 3 },
+      'LL4': { color: 'blue', grid: [[0, 1, 0], [0, 1, 0], [1, 1, 0]], cols: 3, rows: 3 },
+
+      'LR1': { color: 'orange', grid: [[0, 0, 1], [1, 1, 1], [0, 0, 0]], cols: 3, rows: 3 },
+      'LR2': { color: 'orange', grid: [[0, 1, 0], [0, 1, 0], [0, 1, 1]], cols: 3, rows: 3 },
+      'LR3': { color: 'orange', grid: [[0, 0, 0], [1, 1, 1], [1, 0, 0]], cols: 3, rows: 3 },
+      'LR4': { color: 'orange', grid: [[1, 1, 0], [0, 1, 0], [0, 1, 0]], cols: 3, rows: 3 },
+
       'CU1': { color: 'yellow', grid: [[1, 1], [1, 1]], cols: 2, rows: 2 },
-      'SR1': { color: 'purple', grid: [[0, 1, 1], [1, 1, 0]], cols: 3, rows: 2 },
-      'SR2': { color: 'purple', grid: [[1, 0], [1, 1], [0, 1]], cols: 2, rows: 3 },
-      'TR1': { color: 'teal', grid: [[1, 1, 1], [0, 1, 0]], cols: 3, rows: 2 },
-      'TR2': { color: 'teal', grid: [[1, 0], [1, 1], [1, 0]], cols: 2, rows: 3 },
-      'TR3': { color: 'teal', grid: [[0, 1, 0], [1, 1, 1]], cols: 3, rows: 2 },
-      'TR4': { color: 'teal', grid: [[0, 1], [1, 1], [0, 1]], cols: 2, rows: 3 },
-      'SL1': { color: 'green', grid: [[1, 1, 0], [0, 1, 1]], cols: 3, rows: 2 },
-      'SL2': { color: 'green', grid: [[0, 1], [1, 1], [1, 0]], cols: 2, rows: 3 }
+
+      'SR1': { color: 'purple', grid: [[0, 1, 1], [1, 1, 0], [0, 0, 0]], cols: 3, rows: 3 },
+      'SR2': { color: 'purple', grid: [[0, 1, 0], [0, 1, 1], [0, 0, 1]], cols: 3, rows: 3 },
+      'SR3': { color: 'purple', grid: [[0, 0, 0], [0, 1, 1], [1, 1, 0]], cols: 3, rows: 3 },
+      'SR4': { color: 'purple', grid: [[1, 0, 0], [1, 1, 0], [0, 1, 0]], cols: 3, rows: 3 },
+
+      'TR1': { color: 'teal', grid: [[0, 1, 0], [1, 1, 1], [0, 0, 0]], cols: 3, rows: 3 },
+      'TR2': { color: 'teal', grid: [[0, 1, 0], [0, 1, 1], [0, 1, 0]], cols: 3, rows: 3 },
+      'TR3': { color: 'teal', grid: [[0, 0, 0], [1, 1, 1], [0, 1, 0]], cols: 3, rows: 3 },
+      'TR4': { color: 'teal', grid: [[0, 1, 0], [1, 1, 0], [0, 1, 0]], cols: 3, rows: 3 },
+
+      'SL1': { color: 'green', grid: [[1, 1, 0], [0, 1, 1], [0, 0, 0]], cols: 3, rows: 3 },
+      'SL2': { color: 'green', grid: [[0, 0, 1], [0, 1, 1], [0, 1, 0]], cols: 3, rows: 3 },
+      'SL3': { color: 'green', grid: [[0, 0, 0], [1, 1, 0], [0, 1, 1]], cols: 3, rows: 3 },
+      'SL4': { color: 'green', grid: [[0, 1, 0], [1, 1, 0], [1, 0, 0]], cols: 3, rows: 3 }
     }
   }
 }
@@ -612,23 +681,23 @@ function enableKeyboardEvents (game) {
         break
       case 37:
         game.inputs.keyBuffer.push('left')
-        playSoundInGame(game, 'click1', { lowVolume: true })
+        playSoundInGame(game, 'click1', { effect: 'volume75' })
         break
       case 38:
         game.inputs.keyBuffer.push('up')
-        playSoundInGame(game, 'click2', { lowVolume: true })
+        playSoundInGame(game, 'click2', { effect: 'volume75' })
         break
       case 16:
         game.inputs.keyBuffer.push('up')
-        playSoundInGame(game, 'click5', { lowVolume: true })
+        playSoundInGame(game, 'click5', { effect: 'volume75' })
         break
       case 39:
         game.inputs.keyBuffer.push('right')
-        playSoundInGame(game, 'click3', { lowVolume: true })
+        playSoundInGame(game, 'click3', { effect: 'volume75' })
         break
       case 40:
         game.inputs.keyBuffer.push('down')
-        playSoundInGame(game, 'click4', { lowVolume: true })
+        playSoundInGame(game, 'click4', { effect: 'volume75' })
         break
       default:
         console.log('Key down:', code)
@@ -655,8 +724,12 @@ function loadResources () {
   }))
 }
 
+function createBoardGridRow () {
+  return range(BOARD_COLS).map(() => null)
+}
+
 function createBoardGrid () {
-  return range(BOARD_ROWS).map(() => range(BOARD_COLS).map(() => null))
+  return range(BOARD_ROWS).map(createBoardGridRow)
 }
 
 function assert (exp, message = 'Assertion error') {
@@ -679,30 +752,45 @@ function compareShapeAndBoardGridsTest () {
   r = compareShapeAndBoardGrids(shape1.grid, board1, 2, 1)
   assert(r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
 
-  const shape2 = TETRAS.all.SL2 // Green vertical SL.
-  r = compareShapeAndBoardGrids(shape2.grid, board1, 1, 2)
-  assert(r.fits && r.touch.above && r.touch.left && r.touch.below && r.touch.right)
-  r = compareShapeAndBoardGrids(shape2.grid, board1, 1, 0)
-  assert(r.fits && !r.touch.above && r.touch.left && r.touch.below && r.touch.right)
-
-  const shape3 = TETRAS.all.LB1 // Red horizontal LB.
-  r = compareShapeAndBoardGrids(shape3.grid, board1, 3, 0)
-  assert(r.fits && !r.touch.above && r.touch.left && r.touch.below && r.touch.right)
-  const shape4 = TETRAS.all.LB2 // Red vertical LB.
-  r = compareShapeAndBoardGrids(shape4.grid, board1, 0, 3)
-  assert(r.fits && r.touch.above && r.touch.left && r.touch.below && r.touch.right)
-
   const shape5 = TETRAS.all.CU1 // Yellow cube.
   r = compareShapeAndBoardGrids(shape5.grid, board1, 2, 0)
   assert(r.fits && !r.touch.above && r.touch.left && r.touch.below && !r.touch.right)
   r = compareShapeAndBoardGrids(shape5.grid, board1, 2, 2)
   assert(r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
 
-  const shape6 = TETRAS.all.LR2 // Orange vertical LR.
-  r = compareShapeAndBoardGrids(shape6.grid, board1, -2, 2)
-  assert(!r.fits && r.touch.above && !r.touch.left && r.touch.below && r.touch.right)
-
   console.log('All grid tests pass ok.')
+}
+
+function smashLinesTest () {
+  const testGame = {
+    board: {
+      grid: [
+        [{color: 1}, {color: 1}, {color: 1}],
+        [null, { color: 1 }, null],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [null, { color: 1 }, null],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [null, { color: 1 }, null],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}],
+        [{color: 1}, {color: 1}, {color: 1}]
+      ]
+    }
+  }
+  const lines = checkLinesToSmash(testGame)
+  // console.log('lines:', lines)
+  assert(lines.events[0].name === 'single')
+  assert(lines.events[1].name === 'single' && lines.events[1].group[0] === 2)
+  assert(lines.events[2].name === 'triple')
+  assert(lines.events[3].name === 'tetris' && lines.events[3].group[0] === 8)
+  assert(lines.events[4].name === 'double')
+  assert(lines.points === 40 + 40 + 300 + 1200 + 100)
+  return
 }
 
 function enableGameButtons (game) {
@@ -710,6 +798,7 @@ function enableGameButtons (game) {
     switch (name) {
       case 'stop':
         stopGame(game)
+        playSoundInGame(game, 'gameover')
         break
       default:
         console.log('Unhandled button click:', name)
