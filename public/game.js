@@ -220,7 +220,7 @@ function drawEverything (game) {
 
   ctx.save()
   ctx.fillStyle = 'white'
-  ctx.fillRect(pointsX - 10, 10, 200, pointsY * 4)
+  ctx.fillRect(pointsX - 10, 10, 200, pointsY * 3)
   ctx.restore()
 
   ctx.save()
@@ -230,6 +230,15 @@ function drawEverything (game) {
   ctx.fillText('Points:', pointsX, 10)
   ctx.fillText(game.points, pointsX, 10 + pointsY)
   ctx.restore()
+
+  // Draw preview piece.
+  const previewX = game.board.x + game.board.w + 30
+  const previewY = pointsY * 3
+
+  ctx.fillStyle = 'white'
+  ctx.fillRect(previewX - 10, previewY, 200, pointsY * 3)
+  const previewInfo = getPreviewPieceInfo(game)
+  drawShape(game.sprites, previewInfo.shape, previewX, previewY)
 
   // Merge current piece with board.
   info.shape.grid.forEach((row, rI) => {
@@ -469,6 +478,10 @@ function getPieceFromBag (game) {
   return piece
 }
 
+function getPreviewPieceInfo (game) {
+  return getPieceInfo(game, { type: game.bag[game.index], rotation: 1 })
+}
+
 function getPieceInfo (game, piece) {
   const id = piece.type + piece.rotation
   const shape = TETRAS.all[id]
@@ -604,9 +617,9 @@ function createTetraminos () {
       'LL': { count: 4 },
       'LR': { count: 4 },
       'CU': { count: 1 },
-      'SR': { count: 2 },
+      'SR': { count: 4 },
       'TR': { count: 4 },
-      'SL': { count: 2 }
+      'SL': { count: 4 }
     },
     colors: {
       red: createBlock(0),
@@ -711,7 +724,7 @@ function gameKeyDown (game, event) {
       playSoundInGame(game, 'click2', { effect: 'volume75' })
       break
     case 16:
-      game.inputs.keyBuffer.push('up')
+      game.inputs.keyBuffer.push('down')
       playSoundInGame(game, 'click5', { effect: 'volume75' })
       break
     case 39:
