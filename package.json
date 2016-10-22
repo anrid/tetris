@@ -1,9 +1,12 @@
 {
-  "name": "tetris",
+  "name": "Tetris",
   "version": "1.0.0",
+  "description": "An embeddable version of Tetris.",
   "main": "index.js",
   "author": "Anri Digholm",
+  "keywords": "Tetris Retro",
   "license": "MIT",
+  "repository": "git@github.com:anrid/tetris.git",
   "scripts": {
     "start": "node index.js"
   },

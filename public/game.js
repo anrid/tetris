@@ -64,8 +64,8 @@ function run () {
   .then(resources => {
     // Setup basic sound effects.
     resources.effects = {
-      'volume75': createVolumeNode(0.8),
-      'volume50': createVolumeNode(0.6)
+      'volume75': createVolumeNode(0.75),
+      'volume50': createVolumeNode(0.5)
     }
     return resources
   })
@@ -474,7 +474,7 @@ function getPieceFromBag (game) {
   piece.row = -info.rows
 
   game.index++
-  console.log('Got new piece:', piece)
+  // console.log('Got new piece:', piece)
   return piece
 }
 

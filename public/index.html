@@ -23,9 +23,11 @@
     }
     .gameContainer .text {
       font-family: "Press Start", sans-serif;
-      font-size: 0.5rem;
+      font-size: 0.6rem;
+      line-height: 1.5;
     }
     .gameContainer .button {
+      width: auto;
       border: 2px solid gray;
       background: white;
       outline: none;
@@ -33,6 +35,10 @@
       padding: 4px 10px;
       border-radius: 2px;
       cursor: pointer;
+    }
+    .gameContainer .info {
+      margin-top: 20px;
+      width: 200px;
     }
     @font-face {
       font-family: "Press Start";
@@ -49,6 +55,17 @@
       </div>
       <div class="button text" onclick="handleButton('restart')">
         Restart Game
+      </div>
+      <div class="info text" onclick="handleButton('restart')">
+        <p>
+          ARROW KEYS:<br/>
+          Move & Rotate
+        </p>
+        <p>SPACE: Push Down</p>
+        <p>
+          LEFT SHIFT:<br/>
+          Rotate Right
+        </p>
       </div>
     </div>
   </section>
