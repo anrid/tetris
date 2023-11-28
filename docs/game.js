@@ -9,7 +9,7 @@ const BOARD_OFFSET_X = 0;
 const SCALE = 2;
 const BZ = 8;
 const B2 = BZ * SCALE;
-const STARTING_GAME_SPEED = 1 / 15;
+const STARTING_GAME_SPEED = 1 / 4;
 const MAX_RUNTIME = false; // 60000
 // How long to wait before locking a piece in place.
 const PIECE_LOCK_DELAY = 40;
