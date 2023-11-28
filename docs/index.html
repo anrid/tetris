@@ -1,74 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <title>Tetris</title>
-  <meta charset="utf-8" />
-  <meta content="IE=edge;chrome=1" http-equiv="X-UA-Compatible" />
-  <meta content="initial-scale=1, width=device-width, height=device-height" name="viewport" />
-  <style>
-    html body {
-      margin: 0;
-      padding: 0;
-      font-family: "Press Start", sans-serif;
-      font-size: 100%;
-    }
-    body * {
-      box-sizing: border-box;
-    }
-    .gameContainer {
-      margin: 50px;
-      display: flex;
-      justify-content: flex-start;
-      align-items: flex-start;
-    }
-    .gameContainer .text {
-      font-family: "Press Start", sans-serif;
-      font-size: 0.6rem;
-      line-height: 1.5;
-    }
-    .gameContainer .button {
-      width: auto;
-      border: 2px solid gray;
-      background: white;
-      outline: none;
-      margin-bottom: 4px;
-      padding: 4px 10px;
-      border-radius: 2px;
-      cursor: pointer;
-    }
-    .gameContainer .info {
-      margin-top: 20px;
-      width: 200px;
-    }
-    @font-face {
-      font-family: "Press Start";
-      src: url("/font.ttf");
-    }
-  </style>
-</head>
-<body>
-  <section class="gameContainer">
-    <canvas id="game" width="416" height="432"></canvas>
-    <div>
-      <div class="button text" onclick="handleButton('stop')">
-        Stop Game
+  <head>
+    <title>Tetris</title>
+    <meta charset="utf-8" />
+    <meta content="IE=edge;chrome=1" http-equiv="X-UA-Compatible" />
+    <meta
+      content="initial-scale=1, width=device-width, height=device-height"
+      name="viewport"
+    />
+    <style>
+      html body {
+        margin: 0;
+        padding: 0;
+        font-family: "Press Start", sans-serif;
+        font-size: 100%;
+      }
+      body * {
+        box-sizing: border-box;
+      }
+      .gameContainer {
+        margin: 50px;
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-start;
+      }
+      .gameContainer .text {
+        font-family: "Press Start", sans-serif;
+        font-size: 0.6rem;
+        line-height: 1.5;
+      }
+      .gameContainer .button {
+        width: auto;
+        border: 2px solid gray;
+        background: white;
+        outline: none;
+        margin-bottom: 4px;
+        padding: 4px 10px;
+        border-radius: 2px;
+        cursor: pointer;
+      }
+      .gameContainer .info {
+        margin-top: 20px;
+        width: 200px;
+      }
+      @font-face {
+        font-family: "Press Start";
+        src: url("font.ttf");
+      }
+    </style>
+  </head>
+  <body>
+    <section class="gameContainer">
+      <canvas id="game" width="416" height="432"></canvas>
+      <div>
+        <div class="button text" onclick="handleButton('stop')">Stop Game</div>
+        <div class="button text" onclick="handleButton('restart')">
+          Restart Game
+        </div>
+        <div class="info text" onclick="handleButton('restart')">
+          <p>
+            ARROW KEYS:<br />
+            Move & Rotate
+          </p>
+          <p>SPACE: Push Down</p>
+          <p>
+            LEFT SHIFT:<br />
+            Rotate Right
+          </p>
+        </div>
       </div>
-      <div class="button text" onclick="handleButton('restart')">
-        Restart Game
-      </div>
-      <div class="info text" onclick="handleButton('restart')">
-        <p>
-          ARROW KEYS:<br/>
-          Move & Rotate
-        </p>
-        <p>SPACE: Push Down</p>
-        <p>
-          LEFT SHIFT:<br/>
-          Rotate Right
-        </p>
-      </div>
-    </div>
-  </section>
-  <script src="/game.js"></script>
-</body>
+    </section>
+    <script src="game.js"></script>
+  </body>
 </html>
